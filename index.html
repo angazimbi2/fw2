@@ -155,7 +155,7 @@ var THEMES = {
 };
 var C = Object.assign({}, THEME_BASE, THEMES.light);
 var APP_CREATED_LABEL = 'August 2026';
-var APP_VERSION = '1.1';
+var APP_VERSION = '1.2';
 var THEME_KEY = 'tank-ledger-theme-v1';
 function getStoredTheme(){
   try { return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light'; } catch(e) { return 'light'; }
@@ -1002,7 +1002,6 @@ function computeAccountTotals(currency){
     tankDeposited: sumType('tank-deposit'),
     loanRepayments: sumType('loan-repayment'),
     interestEarned: lending.interestEarned,
-    manualDeposits: sumType('other-income'),
     lentOut: lending.outstandingPrincipal,
     cashInHand: cashBalance(currency),
     runningCapital: tx.reduce(function(a,t){ return a+t.amount; },0) + cashBalance(currency) + lending.outstandingPrincipal
@@ -1058,6 +1057,49 @@ function computeMonthlyCashFlow(currency){
     var m = byMonth[mk];
     running += (m.inflow - m.outflow);
     return { month: mk, inflow: m.inflow, outflow: m.outflow, net: m.inflow - m.outflow, endingBalance: running };
+  });
+}
+// Same categorisation as computeProfitLoss (lifetime), but bucketed by calendar month
+// so a given month's profit can be read on its own and compared side-by-side against
+// other months — the lifetime statement alone can't show whether things are
+// improving or declining month to month.
+function computeMonthlyProfitLoss(currency){
+  var tx = state.accountTx.filter(function(t){ return (t.currency||'USD')===currency; });
+  var interestTx = state.interestIncomeTx.filter(function(t){ return (t.currency||'USD')===currency; });
+  if (!tx.length && !interestTx.length) return [];
+  var byMonth = {};
+  var order = [];
+  function bucket(mk){
+    if (!byMonth[mk]) {
+      byMonth[mk] = { month: mk, tankIncome: 0, interestIncome: 0, otherIncome: 0, runningCosts: 0, staffExpense: 0 };
+      order.push(mk);
+    }
+    return byMonth[mk];
+  }
+  tx.forEach(function(t){
+    var mk = monthKey(t.date);
+    var b = bucket(mk);
+    if (t.type === 'tank-deposit') b.tankIncome += t.amount;
+    else if (t.type === 'other-income' && ((t.meta&&t.meta.category)||'operating')==='operating') b.otherIncome += t.amount;
+    else if (t.type === 'withdrawal' && ((t.meta&&t.meta.category)||'operating')==='operating') b.runningCosts += -t.amount;
+    else if (t.type === 'withdrawal' && (t.meta&&t.meta.category)==='staff') b.staffExpense += -t.amount;
+  });
+  interestTx.forEach(function(t){
+    var b = bucket(monthKey(t.date));
+    b.interestIncome += t.amount;
+  });
+  order.sort(function(a,b){ return a<b ? -1 : a>b ? 1 : 0; });
+  var prevProfit = null;
+  return order.map(function(mk){
+    var m = byMonth[mk];
+    var income = m.tankIncome + m.interestIncome + m.otherIncome;
+    var operatingExpense = m.runningCosts + m.staffExpense;
+    var operatingProfit = income - operatingExpense;
+    var row = { month: mk, tankIncome: m.tankIncome, interestIncome: m.interestIncome, otherIncome: m.otherIncome,
+      income: income, runningCosts: m.runningCosts, staffExpense: m.staffExpense, operatingExpense: operatingExpense,
+      operatingProfit: operatingProfit, change: prevProfit===null ? null : operatingProfit - prevProfit };
+    prevProfit = operatingProfit;
+    return row;
   });
 }
 
@@ -2747,9 +2789,8 @@ function renderAccountDashboard(currency, label){
     '</div>';
   html += '<div style="display:flex;gap:10px;margin-bottom:10px">' +
     statCard('Interest earned', moneyFmt(t.interestEarned, currency), 'lifetime, all loans', C.cash) +
-    statCard('Manual deposits', moneyFmt(t.manualDeposits, currency), 'other income', C.purple) +
+    statCard('Money lent out', moneyFmt(t.lentOut, currency), 'currently out with borrowers', C.amber) +
     '</div>';
-  html += '<div style="margin-bottom:14px">' + statCard('Money lent out', moneyFmt(t.lentOut, currency), 'currently out with borrowers', C.amber) + '</div>';
   html += '</div></div>';
   return html;
 }
@@ -2809,6 +2850,38 @@ function renderCashFlowReport(currency, label){
       '<td class="mono" style="text-align:right">'+moneyFmt(r.endingBalance, currency)+'</td></tr>';
   });
   html += '</tbody></table></div></div></div>';
+  return html;
+}
+
+// Shows Operating Profit broken out month by month — most recent first — with a
+// change indicator against the prior month, so improvements and declines are easy
+// to spot at a glance rather than buried in one lifetime total.
+function renderMonthlyProfitLoss(currency, label){
+  var rows = computeMonthlyProfitLoss(currency);
+  if (!rows.length) return '';
+  var key = 'monthlypl-'+currency;
+  var open = !!ui.acctSectionOpen[key];
+  var heading = 'USD Monthly Profit & Loss';
+  var html = '<div class="card collapse-card">' + collapseCardHeader('toggle-acct-section', key, open, heading);
+  if (!open) { html += '</div>'; return html; }
+  html += '<div class="collapse-card-body" style="margin-top:10px">';
+  html += '<div style="font-size:12px;color:'+C.inkSoft+';margin-bottom:10px">Operating profit (income minus running costs and staff costs) for each month, so you can compare one month against the next.</div>' +
+    '<div style="overflow-x:auto"><table><thead><tr><th>Month</th><th style="text-align:right">Income</th><th style="text-align:right">Expenses</th><th style="text-align:right">Profit</th><th style="text-align:right">vs. prior</th></tr></thead><tbody>';
+  rows.slice().reverse().forEach(function(r){
+    var changeCell = '—';
+    if (r.change !== null) {
+      var up = r.change >= 0;
+      changeCell = '<span style="color:'+(up?C.cash:C.crisis)+';font-weight:600">'+(up?'▲':'▼')+' '+moneyFmt(Math.abs(r.change), currency)+'</span>';
+    }
+    html += '<tr><td>'+esc(monthLabel(r.month))+'</td>' +
+      '<td class="mono" style="text-align:right;color:'+C.cash+'">'+moneyFmt(r.income, currency)+'</td>' +
+      '<td class="mono" style="text-align:right;color:'+C.crisis+'">'+moneyFmt(r.operatingExpense, currency)+'</td>' +
+      '<td class="mono" style="text-align:right;font-weight:700;color:'+(r.operatingProfit>=0?C.cash:C.crisis)+'">'+signedMoneyFmt(r.operatingProfit, currency)+'</td>' +
+      '<td class="mono" style="text-align:right;font-size:12px">'+changeCell+'</td></tr>';
+  });
+  html += '</tbody></table></div>' +
+    '<div style="font-size:11px;color:'+C.inkSoft+';margin-top:8px">Same basis as Operating Profit in the lifetime statement below — loan principal, capital spend, tithes and owner draws aren\'t included here, only what the core operation earned and spent that month.</div>' +
+    '</div></div>';
   return html;
 }
 
@@ -3044,6 +3117,8 @@ function renderAccount(){
   html += renderAccountHistory('USD', 'US Dollar ($)');
 
   html += renderCashFlowReport('USD', 'US Dollar ($)');
+
+  html += renderMonthlyProfitLoss('USD', 'US Dollar ($)');
 
   html += renderProfitLossStatement('USD', 'US Dollar ($)');
 
