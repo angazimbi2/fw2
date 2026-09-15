@@ -155,7 +155,7 @@ var THEMES = {
 };
 var C = Object.assign({}, THEME_BASE, THEMES.light);
 var APP_CREATED_LABEL = 'August 2026';
-var APP_VERSION = '1.2';
+var APP_VERSION = '1.3';
 var THEME_KEY = 'tank-ledger-theme-v1';
 function getStoredTheme(){
   try { return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light'; } catch(e) { return 'light'; }
@@ -1066,12 +1066,14 @@ function computeMonthlyCashFlow(currency){
 function computeMonthlyProfitLoss(currency){
   var tx = state.accountTx.filter(function(t){ return (t.currency||'USD')===currency; });
   var interestTx = state.interestIncomeTx.filter(function(t){ return (t.currency||'USD')===currency; });
-  if (!tx.length && !interestTx.length) return [];
+  var loans = state.loans.filter(function(l){ return (l.currency||'USD')===currency && l.badDebt; });
+  if (!tx.length && !interestTx.length && !loans.length) return [];
   var byMonth = {};
   var order = [];
   function bucket(mk){
     if (!byMonth[mk]) {
-      byMonth[mk] = { month: mk, tankIncome: 0, interestIncome: 0, otherIncome: 0, runningCosts: 0, staffExpense: 0 };
+      byMonth[mk] = { month: mk, tankIncome: 0, interestIncome: 0, otherIncome: 0, capitalRecovery: 0,
+        runningCosts: 0, staffExpense: 0, withdrawals: 0, titheGiven: 0, badDebtLoss: 0 };
       order.push(mk);
     }
     return byMonth[mk];
@@ -1081,12 +1083,24 @@ function computeMonthlyProfitLoss(currency){
     var b = bucket(mk);
     if (t.type === 'tank-deposit') b.tankIncome += t.amount;
     else if (t.type === 'other-income' && ((t.meta&&t.meta.category)||'operating')==='operating') b.otherIncome += t.amount;
-    else if (t.type === 'withdrawal' && ((t.meta&&t.meta.category)||'operating')==='operating') b.runningCosts += -t.amount;
-    else if (t.type === 'withdrawal' && (t.meta&&t.meta.category)==='staff') b.staffExpense += -t.amount;
+    else if (t.type === 'other-income' && (t.meta&&t.meta.category)==='capital-recovery') b.capitalRecovery += t.amount;
+    else if (t.type === 'tithe-withdrawal') b.titheGiven += -t.amount;
+    if (t.type === 'withdrawal') {
+      b.withdrawals += -t.amount;
+      if (((t.meta&&t.meta.category)||'operating')==='operating') b.runningCosts += -t.amount;
+      else if ((t.meta&&t.meta.category)==='staff') b.staffExpense += -t.amount;
+    }
   });
   interestTx.forEach(function(t){
     var b = bucket(monthKey(t.date));
     b.interestIncome += t.amount;
+  });
+  // Bad debt is dated by when a loan was written off, and any later recovery offsets
+  // the loss in the month it actually came back — same lifetime totals as
+  // computeLendingTotals, just split across the months the events happened in.
+  loans.forEach(function(l){
+    if (l.dateBadDebt) bucket(monthKey(l.dateBadDebt)).badDebtLoss += (l.badDebtAmount||0);
+    (l.recoveries||[]).forEach(function(r){ bucket(monthKey(r.date)).badDebtLoss -= r.amount; });
   });
   order.sort(function(a,b){ return a<b ? -1 : a>b ? 1 : 0; });
   var prevProfit = null;
@@ -1095,9 +1109,13 @@ function computeMonthlyProfitLoss(currency){
     var income = m.tankIncome + m.interestIncome + m.otherIncome;
     var operatingExpense = m.runningCosts + m.staffExpense;
     var operatingProfit = income - operatingExpense;
+    var totalExpenses = m.withdrawals + m.titheGiven + m.badDebtLoss - m.capitalRecovery;
+    var netProfit = income - totalExpenses;
     var row = { month: mk, tankIncome: m.tankIncome, interestIncome: m.interestIncome, otherIncome: m.otherIncome,
       income: income, runningCosts: m.runningCosts, staffExpense: m.staffExpense, operatingExpense: operatingExpense,
-      operatingProfit: operatingProfit, change: prevProfit===null ? null : operatingProfit - prevProfit };
+      operatingProfit: operatingProfit, withdrawals: m.withdrawals, titheGiven: m.titheGiven, badDebtLoss: m.badDebtLoss,
+      capitalRecovery: m.capitalRecovery, netProfit: netProfit,
+      change: prevProfit===null ? null : operatingProfit - prevProfit };
     prevProfit = operatingProfit;
     return row;
   });
@@ -2865,8 +2883,8 @@ function renderMonthlyProfitLoss(currency, label){
   var html = '<div class="card collapse-card">' + collapseCardHeader('toggle-acct-section', key, open, heading);
   if (!open) { html += '</div>'; return html; }
   html += '<div class="collapse-card-body" style="margin-top:10px">';
-  html += '<div style="font-size:12px;color:'+C.inkSoft+';margin-bottom:10px">Operating profit (income minus running costs and staff costs) for each month, so you can compare one month against the next.</div>' +
-    '<div style="overflow-x:auto"><table><thead><tr><th>Month</th><th style="text-align:right">Income</th><th style="text-align:right">Expenses</th><th style="text-align:right">Profit</th><th style="text-align:right">vs. prior</th></tr></thead><tbody>';
+  html += '<div style="font-size:12px;color:'+C.inkSoft+';margin-bottom:10px">Operating profit (income minus running costs and staff costs) and net profit (which also accounts for capital spend, bad debt, tithes given and owner draws) for each month, so you can compare one month against the next.</div>' +
+    '<div style="overflow-x:auto"><table><thead><tr><th>Month</th><th style="text-align:right">Income</th><th style="text-align:right">Expenses</th><th style="text-align:right">Op. profit</th><th style="text-align:right">Net profit</th><th style="text-align:right">vs. prior</th></tr></thead><tbody>';
   rows.slice().reverse().forEach(function(r){
     var changeCell = '—';
     if (r.change !== null) {
@@ -2877,10 +2895,11 @@ function renderMonthlyProfitLoss(currency, label){
       '<td class="mono" style="text-align:right;color:'+C.cash+'">'+moneyFmt(r.income, currency)+'</td>' +
       '<td class="mono" style="text-align:right;color:'+C.crisis+'">'+moneyFmt(r.operatingExpense, currency)+'</td>' +
       '<td class="mono" style="text-align:right;font-weight:700;color:'+(r.operatingProfit>=0?C.cash:C.crisis)+'">'+signedMoneyFmt(r.operatingProfit, currency)+'</td>' +
+      '<td class="mono" style="text-align:right;font-weight:700;color:'+(r.netProfit>=0?C.cash:C.crisis)+'">'+signedMoneyFmt(r.netProfit, currency)+'</td>' +
       '<td class="mono" style="text-align:right;font-size:12px">'+changeCell+'</td></tr>';
   });
   html += '</tbody></table></div>' +
-    '<div style="font-size:11px;color:'+C.inkSoft+';margin-top:8px">Same basis as Operating Profit in the lifetime statement below — loan principal, capital spend, tithes and owner draws aren\'t included here, only what the core operation earned and spent that month.</div>' +
+    '<div style="font-size:11px;color:'+C.inkSoft+';margin-top:8px">Op. profit matches the lifetime statement\'s Operating Profit; Net profit matches its Net (all cash out) — loan principal lent out and repaid isn\'t counted in either.</div>' +
     '</div></div>';
   return html;
 }
