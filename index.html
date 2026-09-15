@@ -155,7 +155,7 @@ var THEMES = {
 };
 var C = Object.assign({}, THEME_BASE, THEMES.light);
 var APP_CREATED_LABEL = 'August 2026';
-var APP_VERSION = '1.0';
+var APP_VERSION = '1.1';
 var THEME_KEY = 'tank-ledger-theme-v1';
 function getStoredTheme(){
   try { return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light'; } catch(e) { return 'light'; }
@@ -667,8 +667,8 @@ function addLoan(name, amountBorrowed, dateBorrowed, dateDue, amountDue, currenc
   state.loans = state.loans.concat([entry]).sort(function(a,b){ return new Date(a.dateDue)-new Date(b.dateDue); });
   // Issuing a loan is money leaving the Business Account — deducted automatically.
   // Exception: backdated entries, where the cash already left before the account's
-  // recorded history begins (e.g. baked into an opening balance) — posting a loan-out
-  // here would deduct that money a second time.
+  // recorded history begins — posting a loan-out here would deduct that money a
+  // second time.
   if (!skipAccountTx) {
     addAccountTx('loan-out', entry.currency, -amountBorrowed, dateBorrowed, 'Loan to '+name, { loanId: entry.id });
   }
@@ -911,9 +911,6 @@ function cashBalance(currency){
 function hasAccountActivity(currency){
   return state.accountTx.some(function(t){ return (t.currency||'USD')===currency; }) || state.cashTx.some(function(t){ return (t.currency||'USD')===currency; });
 }
-function hasOpeningBalance(currency){
-  return state.accountTx.some(function(t){ return t.type==='opening' && (t.currency||'USD')===currency; });
-}
 function depositTankCollection(amount, date, notes){
   var entry = addAccountTx('tank-deposit', 'USD', amount, date, 'Tank collection deposit'+(notes?' — '+notes:''), null);
   accrueTithe(amount, 'USD', date, 'Tithe on tank collection'+(notes?' — '+notes:''), null);
@@ -984,10 +981,6 @@ function withdrawTithe(amount, currency, date, notes){
 function withdrawCash(amount, currency, date, notes, category){
   return addAccountTx('withdrawal', currency, -amount, date, 'Cash withdrawal'+(notes?' — '+notes:''), { category: category||'operating' });
 }
-function setOpeningBalance(amount, currency, date){
-  var entry = addAccountTx('opening', currency, amount, date, 'Opening balance', null);
-  return entry;
-}
 // Moves money between the Business Account and physical Cash in Hand. Each transfer
 // writes a matching pair of entries — one on each ledger — so both sides stay in sync.
 function transferAccountCash(direction, amount, currency, date, notes){
@@ -1009,7 +1002,7 @@ function computeAccountTotals(currency){
     tankDeposited: sumType('tank-deposit'),
     loanRepayments: sumType('loan-repayment'),
     interestEarned: lending.interestEarned,
-    manualDeposits: sumType('other-income') + sumType('opening'),
+    manualDeposits: sumType('other-income'),
     lentOut: lending.outstandingPrincipal,
     cashInHand: cashBalance(currency),
     runningCapital: tx.reduce(function(a,t){ return a+t.amount; },0) + cashBalance(currency) + lending.outstandingPrincipal
@@ -2615,7 +2608,7 @@ function renderLending(){
       '<div style="font-size:11.5px;color:'+C.inkSoft+';margin-bottom:12px">Optional. Charged daily on whatever balance is still outstanding once a loan goes past its due date — leave at 0 for no late fee.</div>' +
       '<label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:12px;cursor:pointer">' +
       '<input id="ln-backdated" type="checkbox" style="margin-top:3px"/>' +
-      '<span style="font-size:12.5px;color:'+C.inkSoft+'">Backdated entry — this money already left the account before it was tracked here (e.g. baked into an opening balance). Don\'t deduct it again.</span>' +
+      '<span style="font-size:12.5px;color:'+C.inkSoft+'">Backdated entry — this money already left the account before it was tracked here. Don\'t deduct it again.</span>' +
       '</label>' +
       (ui.msg ? '<div style="font-size:12.5px;color:'+C.inkSoft+';margin-bottom:10px">'+esc(ui.msg)+'</div>' : '') +
       '<div style="display:flex;gap:8px">' +
@@ -2754,7 +2747,7 @@ function renderAccountDashboard(currency, label){
     '</div>';
   html += '<div style="display:flex;gap:10px;margin-bottom:10px">' +
     statCard('Interest earned', moneyFmt(t.interestEarned, currency), 'lifetime, all loans', C.cash) +
-    statCard('Manual deposits', moneyFmt(t.manualDeposits, currency), 'opening balance + other income', C.purple) +
+    statCard('Manual deposits', moneyFmt(t.manualDeposits, currency), 'other income', C.purple) +
     '</div>';
   html += '<div style="margin-bottom:14px">' + statCard('Money lent out', moneyFmt(t.lentOut, currency), 'currently out with borrowers', C.amber) + '</div>';
   html += '</div></div>';
@@ -2974,8 +2967,7 @@ function renderAccount(){
     '<button data-action="toggle-acct-form" data-type="income" style="flex:1 1 47%;padding:11px;border-radius:10px;border:1px solid '+(ui.acctFormType==='income'?C.purple:C.line)+';background:'+(ui.acctFormType==='income'?C.purple:C.surface)+';color:'+(ui.acctFormType==='income'?'#fff':C.ink)+';font-weight:600;font-size:12.5px">Add other income</button>' +
     '<button data-action="toggle-acct-form" data-type="withdraw" style="flex:1 1 47%;padding:11px;border-radius:10px;border:1px solid '+(ui.acctFormType==='withdraw'?C.crisis:C.line)+';background:'+(ui.acctFormType==='withdraw'?C.crisis:C.surface)+';color:'+(ui.acctFormType==='withdraw'?'#fff':C.ink)+';font-weight:600;font-size:12.5px">Withdraw cash</button>' +
     '<button data-action="toggle-acct-form" data-type="transfer" style="flex:1 1 47%;padding:11px;border-radius:10px;border:1px solid '+(ui.acctFormType==='transfer'?C.tank:C.line)+';background:'+(ui.acctFormType==='transfer'?C.tank:C.surface)+';color:'+(ui.acctFormType==='transfer'?'#fff':C.ink)+';font-weight:600;font-size:12.5px">Transfer to/from cash</button>' +
-    '</div>' +
-    '<button data-action="toggle-acct-form" data-type="opening" style="width:100%;background:none;border:none;color:'+C.tank+';font-weight:600;font-size:12px;padding:0;margin-bottom:14px;text-align:left">'+(ui.acctFormType==='opening'?'Cancel opening balance':'Set / adjust opening balance')+' →</button>';
+    '</div>';
 
   if (ui.msg && ui.tab==='account') html += '<div style="font-size:12.5px;color:'+C.cash+';margin-bottom:10px">'+esc(ui.msg)+'</div>';
 
@@ -3041,16 +3033,6 @@ function renderAccount(){
       '<label class="label">Notes (optional)</label><input id="acct-transfer-notes" class="field" style="margin-bottom:12px" placeholder="optional"/>' +
       '<div style="display:flex;gap:8px">' +
       '<button data-action="save-acct-transfer" class="btn-primary" style="flex:1">'+icon('swap',16,'#fff')+' Transfer</button>' +
-      '<button data-action="cancel-acct-form" style="flex:0 0 auto;padding:0 16px;border-radius:10px;border:1px solid '+C.line+';background:'+C.surface+';color:'+C.inkSoft+';font-weight:600;font-size:14px">Cancel</button>' +
-      '</div></div>';
-  } else if (ui.acctFormType === 'opening') {
-    html += '<div class="card" style="margin-bottom:14px">' +
-      '<div class="serif" style="font-weight:600;font-size:16px;margin-bottom:10px">Set opening balance</div>' +
-      '<div style="font-size:11.5px;color:'+C.inkSoft+';margin-bottom:10px">Usually set once, the first time you use this. Adding it again simply records another opening-balance entry — it never overwrites history. This is money you manually deposited, so it is not tithed.</div>' +
-            '<label class="label">Amount ('+(ui.acctCurrency==='USD'?'$':'R')+')</label><input id="acct-opening-amount" type="number" class="field mono" style="margin-bottom:10px" placeholder="e.g. 5000"/>' +
-      '<label class="label">Date</label><input id="acct-opening-date" type="date" class="field mono" value="'+todayISO()+'" style="margin-bottom:12px"/>' +
-      '<div style="display:flex;gap:8px">' +
-      '<button data-action="save-acct-opening" class="btn-primary" style="flex:1">'+icon('plus',17,'#fff')+' Save opening balance</button>' +
       '<button data-action="cancel-acct-form" style="flex:0 0 auto;padding:0 16px;border-radius:10px;border:1px solid '+C.line+';background:'+C.surface+';color:'+C.inkSoft+';font-weight:600;font-size:14px">Cancel</button>' +
       '</div></div>';
   }
@@ -3423,14 +3405,6 @@ document.addEventListener('click', function(e){
     if (!atAmt || atAmt<=0) { ui.msg = 'Enter a valid transfer amount.'; render(); return; }
     transferAccountCash(ui.acctTransferDir, atAmt, ui.acctCurrency, atDate, atNotes);
     ui.acctFormType = null; ui.msg = 'Transfer recorded.';
-    render();
-  }
-  else if (action === 'save-acct-opening') {
-    var aoAmt = parseFloat(document.getElementById('acct-opening-amount').value);
-    var aoDate = document.getElementById('acct-opening-date').value || todayISO();
-    if (isNaN(aoAmt)) { ui.msg = 'Enter a valid opening balance.'; render(); return; }
-    setOpeningBalance(aoAmt, ui.acctCurrency, aoDate);
-    ui.acctFormType = null; ui.msg = 'Opening balance set.';
     render();
   }
   else if (action === 'toggle-tithe-form') { ui.titheFormOpen = !ui.titheFormOpen; ui.titheMsg = ''; render(); }
