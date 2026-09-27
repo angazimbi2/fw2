@@ -733,6 +733,7 @@ function tankPaidCycles(t){
 // A single, plain-language view of every cycle across every tank: which are still
 // owed and which are already settled — no need to decode a code to know what's due.
 function renderPayments(){
+  var canCollect = !currentUser || currentUser.role === 'admin';
   var pending = [];
   var paid = [];
   incomeTanks().forEach(function(t){
@@ -773,7 +774,7 @@ function renderPayments(){
           : ('<span style="color:'+C.crisis+';font-weight:600">R'+COLLECTION_TARGET+' owed</span>')) +
         '</div>' +
         '</div>' +
-        '<button data-action="goto-collect" data-tank="'+esc(t.id)+'" data-cycle="'+o.cycle+'" style="flex-shrink:0;background:'+C.cash+';color:#fff;border:none;border-radius:9px;padding:9px 12px;font-weight:600;font-size:12px;white-space:nowrap">Record payment</button>' +
+        (canCollect ? '<button data-action="goto-collect" data-tank="'+esc(t.id)+'" data-cycle="'+o.cycle+'" style="flex-shrink:0;background:'+C.cash+';color:#fff;border:none;border-radius:9px;padding:9px 12px;font-weight:600;font-size:12px;white-space:nowrap">Record payment</button>' : '') +
         '</div>';
     });
     html += '</div>';
@@ -1833,6 +1834,12 @@ function renderDrawer(){
 
 function renderLog(){
   if (!ui.logTankId && state.tanks[0]) ui.logTankId = state.tanks[0].id;
+  // Collecting payments and refilling tanks are admin-only log functions — a
+  // salesperson can still log readings, cleanings and water tests, but if their
+  // mode somehow landed on 'collect' or 'refill' (e.g. a stale nav state), fall
+  // back to the one mode everyone can use.
+  var canCollectOrRefill = !currentUser || currentUser.role === 'admin';
+  if (!canCollectOrRefill && (ui.logMode === 'collect' || ui.logMode === 'refill')) ui.logMode = 'reading';
   var mode = ui.logMode;
   // Collecting only makes sense for tanks with income tracking on — a refill-only
   // tank never has anything to collect, so it's left out of that picker entirely.
@@ -1846,8 +1853,8 @@ function renderLog(){
 
   var html = '<div style="display:flex;gap:5px;margin-bottom:6px;background:'+C.paper+';padding:4px;border-radius:13px">' +
     '<button data-action="log-mode" data-mode="reading" style="flex:1;padding:9px 4px;border-radius:10px;border:none;background:'+(mode==='reading'?'linear-gradient(135deg,'+C.tank+','+C.tankDeep+')':'transparent')+';color:'+(mode==='reading'?'#fff':C.inkSoft)+';font-weight:650;font-size:12px;box-shadow:'+(mode==='reading'?'0 3px 8px -2px rgba(36,84,224,0.5)':'none')+';transition:all .15s ease">Level reading</button>' +
-    '<button data-action="log-mode" data-mode="collect" style="flex:1;padding:9px 4px;border-radius:10px;border:none;background:'+(mode==='collect'?'linear-gradient(135deg,#14B87F,'+C.cash+')':'transparent')+';color:'+(mode==='collect'?'#fff':C.inkSoft)+';font-weight:650;font-size:12px;box-shadow:'+(mode==='collect'?'0 3px 8px -2px rgba(10,154,99,0.5)':'none')+';transition:all .15s ease">Collect R'+COLLECTION_TARGET+'</button>' +
-    '<button data-action="log-mode" data-mode="refill" style="flex:1;padding:9px 4px;border-radius:10px;border:none;background:'+(mode==='refill'?'linear-gradient(135deg,'+C.tank+','+C.tankDeep+')':'transparent')+';color:'+(mode==='refill'?'#fff':C.inkSoft)+';font-weight:650;font-size:12px;box-shadow:'+(mode==='refill'?'0 3px 8px -2px rgba(36,84,224,0.5)':'none')+';transition:all .15s ease">Refill tank</button>' +
+    (canCollectOrRefill ? '<button data-action="log-mode" data-mode="collect" style="flex:1;padding:9px 4px;border-radius:10px;border:none;background:'+(mode==='collect'?'linear-gradient(135deg,#14B87F,'+C.cash+')':'transparent')+';color:'+(mode==='collect'?'#fff':C.inkSoft)+';font-weight:650;font-size:12px;box-shadow:'+(mode==='collect'?'0 3px 8px -2px rgba(10,154,99,0.5)':'none')+';transition:all .15s ease">Collect R'+COLLECTION_TARGET+'</button>' : '') +
+    (canCollectOrRefill ? '<button data-action="log-mode" data-mode="refill" style="flex:1;padding:9px 4px;border-radius:10px;border:none;background:'+(mode==='refill'?'linear-gradient(135deg,'+C.tank+','+C.tankDeep+')':'transparent')+';color:'+(mode==='refill'?'#fff':C.inkSoft)+';font-weight:650;font-size:12px;box-shadow:'+(mode==='refill'?'0 3px 8px -2px rgba(36,84,224,0.5)':'none')+';transition:all .15s ease">Refill tank</button>' : '') +
     '</div><div style="display:flex;gap:5px;margin-bottom:16px;background:'+C.paper+';padding:4px;border-radius:13px">' +
     '<button data-action="log-mode" data-mode="clean" style="flex:1;padding:9px 4px;border-radius:10px;border:none;background:'+(mode==='clean'?'linear-gradient(135deg,'+C.amber+',#B8660A)':'transparent')+';color:'+(mode==='clean'?'#fff':C.inkSoft)+';font-weight:650;font-size:12px;box-shadow:'+(mode==='clean'?'0 3px 8px -2px rgba(217,130,10,0.5)':'none')+';transition:all .15s ease">Tank cleaned</button>' +
     '<button data-action="log-mode" data-mode="test" style="flex:1;padding:9px 4px;border-radius:10px;border:none;background:'+(mode==='test'?'linear-gradient(135deg,'+C.purple+',#5B21B6)':'transparent')+';color:'+(mode==='test'?'#fff':C.inkSoft)+';font-weight:650;font-size:12px;box-shadow:'+(mode==='test'?'0 3px 8px -2px rgba(124,58,237,0.5)':'none')+';transition:all .15s ease">Water test result</button>' +
@@ -1929,6 +1936,7 @@ function renderLog(){
 }
 
 function renderTanks(){
+  var isAdminUser = !currentUser || currentUser.role === 'admin';
   var html = '<div style="display:flex;flex-direction:column;gap:14px">';
 
   if (state.tanks.length > 4) {
@@ -1997,7 +2005,7 @@ function renderTanks(){
         '</div></div>';
     } else {
       html += '<div style="display:flex;align-items:center;gap:8px"><div class="serif" style="font-weight:600;font-size:17px">'+esc(t.name)+'</div>' +
-        '<button data-action="edit-tank" data-tank="'+t.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('pencil',13)+'</button></div>' +
+        ((!currentUser || currentUser.role === 'admin') ? '<button data-action="edit-tank" data-tank="'+t.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('pencil',13)+'</button>' : '') + '</div>' +
         '<div style="font-size:12.5px;color:'+C.inkSoft+';display:flex;flex-wrap:wrap;gap:8px;margin-top:2px">' +
         (t.location ? '<span style="display:flex;align-items:center;gap:3px">'+icon('pin',12)+esc(t.location)+'</span>' : '') +
         (t.salesperson ? '<span style="display:flex;align-items:center;gap:3px">'+icon('user',12)+esc(t.salesperson)+'</span>' : '') +
@@ -2055,14 +2063,16 @@ function renderTanks(){
         if (tCleaningsAll.length || tWaterTestsAll.length) {
           html += '<div style="margin-top:8px">';
           tCleaningsAll.slice(0,2).forEach(function(c){
+            var canEditRecords = !currentUser || currentUser.role === 'admin';
             html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:11.5px">' +
               '<span style="color:'+C.inkSoft+'">'+c.date+' · cleaned by '+esc(c.person)+(c.method?' · '+esc(c.method):'')+'</span>' +
-              '<button data-action="delete-cleaning" data-id="'+c.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('trash',12)+'</button></div>';
+              (canEditRecords ? '<button data-action="delete-cleaning" data-id="'+c.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('trash',12)+'</button>' : '') + '</div>';
           });
           tWaterTestsAll.slice(0,2).forEach(function(w){
+            var canEditRecords2 = !currentUser || currentUser.role === 'admin';
             html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:11.5px">' +
               '<span style="color:'+(w.result==='Fail'?C.crisis:C.inkSoft)+'">'+w.date+' · '+esc(w.laboratory)+' · '+esc(w.result)+(w.sampleId?' · '+esc(w.sampleId):'')+'</span>' +
-              '<button data-action="delete-watertest" data-id="'+w.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('trash',12)+'</button></div>';
+              (canEditRecords2 ? '<button data-action="delete-watertest" data-id="'+w.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('trash',12)+'</button>' : '') + '</div>';
           });
           html += '</div>';
         }
@@ -2085,8 +2095,8 @@ function renderTanks(){
             html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:12.5px">' +
               '<span style="color:'+C.inkSoft+'">'+r.date+' · reading</span>' +
               '<span style="display:flex;align-items:center;gap:6px"><span class="mono">'+r.level+'L</span>' +
-              '<button data-action="edit-reading" data-id="'+r.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('pencil',13)+'</button>' +
-              '<button data-action="delete-reading" data-id="'+r.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('trash',13)+'</button></span></div>';
+              (isAdminUser ? '<button data-action="edit-reading" data-id="'+r.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('pencil',13)+'</button>' +
+              '<button data-action="delete-reading" data-id="'+r.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('trash',13)+'</button>' : '') + '</span></div>';
           }
         });
         if (tCollectionsAll.length) {
@@ -2115,8 +2125,8 @@ function renderTanks(){
             html += '<div data-coll-row="'+esc(t.id)+'" data-search="'+esc(searchText)+'" style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:12.5px">' +
               '<span style="color:'+C.cash+'">'+c.date+' · collected · '+codePill(cycleCode(t,c.cycle))+'</span>' +
               '<span style="display:flex;align-items:center;gap:6px"><span class="mono" style="color:'+C.cash+'">'+rand(c.amount)+'</span>' +
-              '<button data-action="edit-collection" data-id="'+c.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('pencil',13)+'</button>' +
-              '<button data-action="delete-collection" data-id="'+c.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('trash',13)+'</button></span></div>';
+              (isAdminUser ? '<button data-action="edit-collection" data-id="'+c.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('pencil',13)+'</button>' +
+              '<button data-action="delete-collection" data-id="'+c.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('trash',13)+'</button>' : '') + '</span></div>';
           }
         });
         if (tCollectionsAll.length > 5) {
@@ -2149,8 +2159,8 @@ function renderTanks(){
             html += '<div data-refill-row="'+esc(t.id)+'" data-search="'+esc(rSearchText)+'" style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:12.5px">' +
               '<span style="color:'+C.inkSoft+'">'+r.date+' · refilled · closed '+codePill(cycleCode(t,r.cycle))+'</span>' +
               '<span style="display:flex;align-items:center;gap:6px"><span class="mono">'+r.litresSold+'L · spent '+rand(r.salesPay+r.restock)+'</span>' +
-              '<button data-action="edit-refill" data-id="'+r.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('pencil',13)+'</button>' +
-              '<button data-action="delete-refill" data-id="'+r.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('trash',13)+'</button></span></div>';
+              (isAdminUser ? '<button data-action="edit-refill" data-id="'+r.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('pencil',13)+'</button>' +
+              '<button data-action="delete-refill" data-id="'+r.id+'" style="background:none;border:none;color:'+C.inkSoft+';display:flex">'+icon('trash',13)+'</button>' : '') + '</span></div>';
           }
         });
         if (tRefillsAll.length > 3) {
@@ -3355,7 +3365,7 @@ function renderPinModal(){
 }
 
 function render(){
-  if (currentUser && currentUser.role !== 'admin' && (ui.tab === 'lending' || ui.tab === 'account')) ui.tab = 'overview';
+  if (currentUser && currentUser.role !== 'admin' && (ui.tab === 'lending' || ui.tab === 'account' || ui.tab === 'income')) ui.tab = 'overview';
   var loading = false;
   var headerEyebrow = ui.tab==='lending' ? 'Money Lending' : ui.tab==='account' ? 'FW2 Finance' : 'FW2 Water Vending';
   var headerTitle = ui.tab==='lending' ? 'Finance Monitor' : ui.tab==='account' ? 'Business Account' : 'Tank Ledger';
@@ -3384,7 +3394,7 @@ function render(){
 
   var isAdmin = !currentUser || currentUser.role === 'admin'; // fail open only if auth hasn't populated yet
   body += '</div><div class="bottom-nav">' +
-    navBtn('overview','gauge','Overview', C.tank) + navBtn('payments','checklist','Payments', C.crisis) + navBtn('log','log','Log', C.amber) + navBtn('tanks','drop','Tanks', C.tank) + navBtn('income','trend','Income', C.cash) + navBtn('graphs','bars','Graphs', C.purple) + navBtn('map','pin','Map', C.mapRed) +
+    navBtn('overview','gauge','Overview', C.tank) + navBtn('payments','checklist','Payments', C.crisis) + navBtn('log','log','Log', C.amber) + navBtn('tanks','drop','Tanks', C.tank) + (isAdmin ? navBtn('income','trend','Income', C.cash) : '') + navBtn('graphs','bars','Graphs', C.purple) + navBtn('map','pin','Map', C.mapRed) +
     (isAdmin ? navBtn('lending','cash','Lending', C.cash) + navBtn('account','wallet','Account', C.gold) : '') +
     '</div>' + renderConfirmModal() + renderPinModal() + renderDrawer();
 
@@ -3416,10 +3426,31 @@ function switchTab(tab){
 }
 
 // ---------- event delegation ----------
+// Actions a salesperson (any non-admin login) can never trigger, regardless of
+// whether a button for them happens to be on screen — the UI already hides these,
+// this is just the backstop. Income, Lending and Account stay off-limits at the
+// tab level (see render()); this covers the record-level edit/delete controls on
+// the Tanks tab, the two restricted Log functions, and the Payments shortcut into
+// the Collect log.
+var ADMIN_ONLY_ACTIONS = {
+  'edit-tank': 1, 'delete-tank': 1, 'toggle-income-enabled': 1,
+  'edit-reading': 1, 'delete-reading': 1, 'save-edit-reading': 1,
+  'edit-collection': 1, 'delete-collection': 1, 'save-edit-collection': 1,
+  'edit-refill': 1, 'delete-refill': 1, 'save-edit-refill': 1,
+  'delete-cleaning': 1, 'delete-watertest': 1,
+  'goto-collect': 1, 'save-collection': 1, 'save-refill': 1,
+  'export-excel': 1
+};
 document.addEventListener('click', function(e){
   var el = e.target.closest('[data-action]');
   if (!el) return;
   var action = el.getAttribute('data-action');
+  var isSalesperson = currentUser && currentUser.role !== 'admin';
+  if (isSalesperson && ADMIN_ONLY_ACTIONS[action]) return;
+  if (isSalesperson && action === 'log-mode') {
+    var reqMode = el.getAttribute('data-mode');
+    if (reqMode === 'collect' || reqMode === 'refill') return;
+  }
 
   if (action === 'set-tab') { ui.drawerOpen = false; switchTab(el.getAttribute('data-tab')); }
   else if (action === 'sign-out') { auth.signOut(); }
