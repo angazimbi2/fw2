@@ -1652,7 +1652,7 @@ function renderOverview(){
   var html = '';
 
   var backupAge = daysSinceBackup();
-  if (backupAge === null || backupAge >= 7) {
+  if ((!currentUser || currentUser.role === 'admin') && (backupAge === null || backupAge >= 7)) {
     html += '<div class="card" style="margin-bottom:14px;border-color:'+C.tank+'55;background:linear-gradient(180deg,'+C.tank+'0F,'+C.surface+');display:flex;gap:11px;align-items:center">' +
       '<div style="flex-shrink:0;width:32px;height:32px;border-radius:10px;background:'+C.tank+'1A;display:flex;align-items:center;justify-content:center">'+icon('lock',16,C.tank)+'</div>' +
       '<div style="flex:1;min-width:0">' +
@@ -1768,16 +1768,19 @@ function renderDrawer(){
   var open = ui.drawerOpen;
   var themeMode = document.documentElement.getAttribute('data-theme') || 'light';
   var locked = pinIsSet();
+  var isAdminUser = !currentUser || currentUser.role === 'admin';
 
   var pinBody =
     '<div style="font-size:12.5px;color:'+C.inkSoft+';margin-bottom:12px">Require a PIN to open the Payments, Log, Tanks, Income, Lending and Account tabs, so records can\'t be casually edited or deleted by someone else with your phone.</div>' +
-    (locked
-      ? ('<div style="display:flex;gap:8px">' +
-         '<button data-action="open-set-pin" style="flex:1;border:1px solid '+C.line+';border-radius:10px;background:'+C.surface+';color:'+C.ink+';font-weight:600;font-size:13px;padding:10px">Change PIN</button>' +
-         '<button data-action="open-remove-pin" style="flex:1;border:1px solid '+C.line+';border-radius:10px;background:'+C.surface+';color:'+C.crisis+';font-weight:600;font-size:13px;padding:10px">Remove PIN</button>' +
-         '</div>')
-      : ('<button data-action="open-set-pin" class="btn-primary">'+icon('lock',16,'#fff')+' Set a PIN</button>')
-    );
+    (!isAdminUser
+      ? '<div style="font-size:12.5px;color:'+C.inkSoft+'">Only an admin can change or remove the PIN.</div>'
+      : (locked
+        ? ('<div style="display:flex;gap:8px">' +
+           '<button data-action="open-set-pin" style="flex:1;border:1px solid '+C.line+';border-radius:10px;background:'+C.surface+';color:'+C.ink+';font-weight:600;font-size:13px;padding:10px">Change PIN</button>' +
+           '<button data-action="open-remove-pin" style="flex:1;border:1px solid '+C.line+';border-radius:10px;background:'+C.surface+';color:'+C.crisis+';font-weight:600;font-size:13px;padding:10px">Remove PIN</button>' +
+           '</div>')
+        : ('<button data-action="open-set-pin" class="btn-primary">'+icon('lock',16,'#fff')+' Set a PIN</button>')
+      ));
 
   var resetBody =
     '<div style="font-size:12.5px;color:'+C.inkSoft+';margin-bottom:12px">Permanently erase every tank, reading, collection, refill, cleaning, water test, loan, and account on this phone, and turn off PIN protection. This can\'t be undone — download a backup first if you might need this data again.</div>' +
@@ -1793,10 +1796,12 @@ function renderDrawer(){
   var backupBody =
     '<div style="font-size:12.5px;color:'+C.inkSoft+';margin-bottom:12px">This app only saves data on this phone. Download a backup now and then and keep it in Google Drive or email — you can restore it here if you switch phones or clear Chrome.</div>' +
     (ui.msg && ui.tab==='overview' ? '<div style="font-size:12.5px;color:'+C.cash+';margin-bottom:10px">'+esc(ui.msg)+'</div>' : '') +
-    '<div style="display:flex;gap:8px">' +
-    '<button data-action="download-backup" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid '+C.line+';border-radius:10px;background:'+C.surface+';color:'+C.ink+';font-weight:600;font-size:13px;padding:10px">Download backup</button>' +
-    '<button data-action="trigger-restore" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid '+C.line+';border-radius:10px;background:'+C.surface+';color:'+C.ink+';font-weight:600;font-size:13px;padding:10px">Restore backup</button>' +
-    '</div><input type="file" id="restore-input" accept="application/json" style="display:none"/>';
+    (isAdminUser
+      ? ('<div style="display:flex;gap:8px">' +
+         '<button data-action="download-backup" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid '+C.line+';border-radius:10px;background:'+C.surface+';color:'+C.ink+';font-weight:600;font-size:13px;padding:10px">Download backup</button>' +
+         '<button data-action="trigger-restore" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid '+C.line+';border-radius:10px;background:'+C.surface+';color:'+C.ink+';font-weight:600;font-size:13px;padding:10px">Restore backup</button>' +
+         '</div><input type="file" id="restore-input" accept="application/json" style="display:none"/>')
+      : '<div style="font-size:12.5px;color:'+C.inkSoft+'">Only an admin can download or restore a backup.</div>');
 
   var aboutBody =
     '<div style="display:flex;flex-direction:column;gap:9px;font-size:12.5px;color:'+C.inkSoft+'">' +
@@ -2586,6 +2591,7 @@ function stopLocationWatch(){
 // map. Drops a draggable pending pin there and opens the "other tank" form pre-filled
 // with those coordinates, ready to be named and saved (or dragged to fine-tune first).
 function handleMapLongPress(latlng){
+  if (currentUser && currentUser.role !== 'admin') return; // view-only map for non-admins
   ui.pendingOtherTankLatLng = { lat: latlng.lat, lng: latlng.lng };
   ui.addingOtherTank = true;
   ui.otherTankMsg = '';
@@ -2703,6 +2709,7 @@ function initMap(){
 }
 
 function renderMap(){
+  var isAdminUser = !currentUser || currentUser.role === 'admin';
   var withCoords = state.tanks.filter(function(t){ return t.lat && t.lng; });
   var others = (state.otherTanks || []).slice().sort(naturalNameCompare);
   var html = '<div class="card">' +
@@ -2722,7 +2729,7 @@ function renderMap(){
     '</div>' +
     '<div style="font-size:12px;color:'+C.inkSoft+';margin-bottom:10px">Pin tanks belonging to other people directly from here — no need to go through the Tanks tab. Useful for placing new tanks correctly and for judging how much nearby tank congestion is contributing to slow water movement, e.g. around Mai Taa or Kuma 17.</div>';
 
-  if (ui.addingOtherTank) {
+  if (ui.addingOtherTank && isAdminUser) {
     html += '<label class="label">Name / owner / area</label><input id="ot-name" class="field" style="margin-bottom:10px" placeholder="e.g. Mai Taa or Kuma 17 tank"/>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">' +
       '<input id="ot-lat" class="field mono" value="'+(ui.pendingOtherTankLatLng ? ui.pendingOtherTankLatLng.lat.toFixed(6) : '')+'" placeholder="Latitude e.g. -22.2170"/>' +
@@ -2736,7 +2743,7 @@ function renderMap(){
       '<button data-action="save-other-tank" class="btn-primary" style="flex:1;background:linear-gradient(135deg,'+C.amber+' 0%,#A85E06 100%);box-shadow:0 1px 1px rgba(120,80,10,0.15),0 8px 18px -6px rgba(217,130,10,0.45)">'+icon('plus',17,'#fff')+' Add to map</button>' +
       '<button data-action="cancel-add-other-tank" style="flex:0 0 auto;padding:0 16px;border-radius:10px;border:1px solid '+C.line+';background:'+C.surface+';color:'+C.inkSoft+';font-weight:600;font-size:14px">Cancel</button>' +
       '</div>';
-  } else {
+  } else if (isAdminUser) {
     html += '<button data-action="toggle-add-other-tank" style="display:flex;align-items:center;justify-content:center;gap:8px;border:1px dashed '+C.amber+';border-radius:14px;background:'+C.surface+';color:'+C.amber+';font-weight:600;font-size:14px;padding:12px;width:100%">'+icon('plus',17,C.amber)+' Add a tank that isn\'t mine</button>';
   }
   html += '</div>';
@@ -2745,7 +2752,7 @@ function renderMap(){
     html += '<div class="card" style="margin-top:14px"><div class="serif" style="font-weight:600;font-size:15px;margin-bottom:8px">Other tanks pinned ('+others.length+')</div>';
     others.forEach(function(o){
       var hasCoords = o.lat!=null && o.lng!=null && o.lat!=='' && o.lng!=='';
-      if (ui.editingOtherTankId === o.id) {
+      if (ui.editingOtherTankId === o.id && isAdminUser) {
         html += '<div style="padding:10px 0;border-top:1px solid '+C.line+'">' +
           '<label class="label">Name / owner / area</label><input id="eot-name-'+o.id+'" class="field" style="margin-bottom:8px" value="'+esc(o.name)+'"/>' +
           '<label class="label">Description / notes</label><textarea id="eot-notes-'+o.id+'" class="field" style="margin-bottom:10px;min-height:56px;resize:vertical">'+esc(o.notes||'')+'</textarea>' +
@@ -2760,8 +2767,8 @@ function renderMap(){
           '<div class="mono" style="color:'+C.inkSoft+';font-size:11px">'+esc(o.lat)+', '+esc(o.lng)+'</div>' +
           (o.notes ? '<div style="color:'+C.inkSoft+';font-size:11px;margin-top:1px">'+esc(o.notes)+'</div>' : '') +
           '</div>' +
-          '<button data-action="edit-other-tank" data-id="'+o.id+'" style="flex-shrink:0;background:none;border:none;color:'+C.tank+';display:flex;padding:4px">'+icon('pencil',14,C.tank)+'</button>' +
-          '<button data-action="delete-other-tank" data-id="'+o.id+'" style="flex-shrink:0;background:none;border:none;color:'+C.crisis+';display:flex;padding:4px">'+icon('trash',14,C.crisis)+'</button>' +
+          (isAdminUser ? '<button data-action="edit-other-tank" data-id="'+o.id+'" style="flex-shrink:0;background:none;border:none;color:'+C.tank+';display:flex;padding:4px">'+icon('pencil',14,C.tank)+'</button>' +
+          '<button data-action="delete-other-tank" data-id="'+o.id+'" style="flex-shrink:0;background:none;border:none;color:'+C.crisis+';display:flex;padding:4px">'+icon('trash',14,C.crisis)+'</button>' : '') +
           '</div>';
       }
     });
@@ -3433,13 +3440,16 @@ function switchTab(tab){
 // the Tanks tab, the two restricted Log functions, and the Payments shortcut into
 // the Collect log.
 var ADMIN_ONLY_ACTIONS = {
-  'edit-tank': 1, 'delete-tank': 1, 'toggle-income-enabled': 1,
+  'edit-tank': 1, 'delete-tank': 1, 'toggle-income-enabled': 1, 'toggle-add-tank': 1, 'save-new-tank': 1,
   'edit-reading': 1, 'delete-reading': 1, 'save-edit-reading': 1,
   'edit-collection': 1, 'delete-collection': 1, 'save-edit-collection': 1,
   'edit-refill': 1, 'delete-refill': 1, 'save-edit-refill': 1,
   'delete-cleaning': 1, 'delete-watertest': 1,
   'goto-collect': 1, 'save-collection': 1, 'save-refill': 1,
-  'export-excel': 1
+  'export-excel': 1,
+  'toggle-add-other-tank': 1, 'save-other-tank': 1, 'edit-other-tank': 1, 'delete-other-tank': 1,
+  'save-edit-other-tank': 1, 'use-my-location-other': 1,
+  'open-set-pin': 1, 'open-remove-pin': 1, 'download-backup': 1, 'trigger-restore': 1
 };
 document.addEventListener('click', function(e){
   var el = e.target.closest('[data-action]');
