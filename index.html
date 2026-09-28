@@ -1961,12 +1961,9 @@ function renderTanks(){
     html += '<button data-action="toggle-add-tank" style="display:flex;align-items:center;justify-content:center;gap:8px;border:1px dashed '+C.tank+';border-radius:14px;background:'+C.surface+';color:'+C.tank+';font-weight:600;font-size:14px;padding:12px">'+icon('plus',17,C.tank)+' Add a new tank</button>';
   }
 
-  var visibleTanks = (currentUser && currentUser.role === 'salesperson')
-    ? state.tanks.filter(function(t){ return (t.salesperson||'').trim().toLowerCase() === (currentUser.name||'').trim().toLowerCase(); })
-    : state.tanks;
-  if (currentUser && currentUser.role === 'salesperson' && !visibleTanks.length) {
-    html += '<div class="card" style="text-align:center;color:'+C.inkSoft+';font-size:13px">No tank is assigned to your account yet. Ask your admin to set the "Salesperson" field on your tank to match your login name exactly.</div>';
-  }
+  // Every role (admin, manager, salesperson) sees every tank; edit controls are
+  // hidden separately for non-admins, so salespersons get a read-only view of all tanks.
+  var visibleTanks = state.tanks;
   visibleTanks.forEach(function(t){
     var rate = tankRate(t.id);
     var tReadings = state.readings.filter(function(r){ return r.tankId===t.id; }).sort(function(a,b){ return new Date(b.date)-new Date(a.date); }).slice(0,5);
