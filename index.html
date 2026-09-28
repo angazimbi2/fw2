@@ -1811,6 +1811,7 @@ function renderDrawer(){
     '<div style="font-size:12.5px;color:'+C.inkSoft+';margin-bottom:12px">Signed in as <span style="font-weight:650;color:'+C.ink+'">'+esc(currentUser ? currentUser.name : '')+'</span> ('+esc(currentUser ? currentUser.role : '')+')</div>' +
     '<button data-action="sign-out" style="width:100%;border:1px solid '+C.crisis+';border-radius:10px;background:'+C.surface+';color:'+C.crisis+';font-weight:600;font-size:13px;padding:10px">Sign out</button>';
 
+  var drawerIsAdmin = !currentUser || currentUser.role === 'admin';
   return '' +
     '<div class="drawer-overlay'+(open?' open':'')+'" data-action="close-drawer"></div>' +
     '<div class="drawer-panel'+(open?' open':'')+'">' +
@@ -1824,10 +1825,10 @@ function renderDrawer(){
     '</div>' +
     '<div class="drawer-body">' +
     drawerSection('account','Account','user',C.tank,accountBody) +
-    drawerSection('pin','PIN protection','lock',C.tank,pinBody) +
-    drawerSection('reset','Reset app','trash',C.crisis,resetBody) +
+    (drawerIsAdmin ? drawerSection('pin','PIN protection','lock',C.tank,pinBody) : '') +
+    (drawerIsAdmin ? drawerSection('reset','Reset app','trash',C.crisis,resetBody) : '') +
     drawerSection('appearance','Appearance','sun',C.gold,appearanceBody) +
-    drawerSection('backup','Backup and restore','swap',C.cash,backupBody) +
+    (drawerIsAdmin ? drawerSection('backup','Backup and restore','swap',C.cash,backupBody) : '') +
     drawerSection('about','About app','info',C.purple,aboutBody) +
     '</div></div>';
 }
@@ -2587,6 +2588,7 @@ function stopLocationWatch(){
 // map. Drops a draggable pending pin there and opens the "other tank" form pre-filled
 // with those coordinates, ready to be named and saved (or dragged to fine-tune first).
 function handleMapLongPress(latlng){
+  if (currentUser && currentUser.role !== 'admin') return; // dropping pins is admin-only
   ui.pendingOtherTankLatLng = { lat: latlng.lat, lng: latlng.lng };
   ui.addingOtherTank = true;
   ui.otherTankMsg = '';
@@ -2704,6 +2706,7 @@ function initMap(){
 }
 
 function renderMap(){
+  var isMapAdmin = !currentUser || currentUser.role === 'admin';
   var withCoords = state.tanks.filter(function(t){ return t.lat && t.lng; });
   var others = (state.otherTanks || []).slice().sort(naturalNameCompare);
   var html = '<div class="card">' +
@@ -2711,7 +2714,7 @@ function renderMap(){
     '<div class="serif" style="font-weight:600;font-size:17px">Tank locations</div>' +
     '<button data-action="locate-me" style="flex-shrink:0;display:flex;align-items:center;gap:5px;border:1px solid '+C.line+';border-radius:8px;background:'+C.surface+';color:'+C.tank+';font-weight:600;font-size:11.5px;padding:6px 9px">'+icon('pin',13,C.tank)+' My location</button>' +
     '</div>' +
-    '<div style="font-size:12px;color:'+C.inkSoft+';margin-bottom:6px">Switch between street and satellite with the layers icon on the map. Blue pins are your tanks (add coordinates from the Tanks tab); amber markers below are tanks that aren\'t yours. Long-press (or right-click) anywhere on the map to drop a pin for one — drag it to fine-tune, then name it below.</div>' +
+    '<div style="font-size:12px;color:'+C.inkSoft+';margin-bottom:6px">Switch between street and satellite with the layers icon on the map. Blue pins are your tanks (add coordinates from the Tanks tab); amber markers below are tanks that aren\'t yours.'+(isMapAdmin ? ' Long-press (or right-click) anywhere on the map to drop a pin for one — drag it to fine-tune, then name it below.' : '')+'</div>' +
     '<div id="location-status" style="font-size:11.5px;color:'+C.inkSoft+';min-height:15px;margin-bottom:6px"></div>' +
     '<div id="leaflet-map" style="height:420px;border-radius:14px;overflow:hidden;background:'+C.paper+'"></div>' +
     '</div>';
@@ -2721,9 +2724,11 @@ function renderMap(){
     '<span style="flex-shrink:0;width:14px;height:14px;border-radius:999px;background:'+C.amber+';border:2px solid #fff;box-shadow:0 0 0 1px '+C.line+'"></span>' +
     '<div class="serif" style="font-weight:600;font-size:16px">Other tanks (not mine)</div>' +
     '</div>' +
-    '<div style="font-size:12px;color:'+C.inkSoft+';margin-bottom:10px">Pin tanks belonging to other people directly from here — no need to go through the Tanks tab. Useful for placing new tanks correctly and for judging how much nearby tank congestion is contributing to slow water movement, e.g. around Mai Taa or Kuma 17.</div>';
+    (isMapAdmin ? '<div style="font-size:12px;color:'+C.inkSoft+';margin-bottom:10px">Pin tanks belonging to other people directly from here — no need to go through the Tanks tab. Useful for placing new tanks correctly and for judging how much nearby tank congestion is contributing to slow water movement, e.g. around Mai Taa or Kuma 17.</div>' : '');
 
-  if (ui.addingOtherTank) {
+  if (!isMapAdmin) {
+    // view-only: skip straight to the list rendered below
+  } else if (ui.addingOtherTank) {
     html += '<label class="label">Name / owner / area</label><input id="ot-name" class="field" style="margin-bottom:10px" placeholder="e.g. Mai Taa or Kuma 17 tank"/>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">' +
       '<input id="ot-lat" class="field mono" value="'+(ui.pendingOtherTankLatLng ? ui.pendingOtherTankLatLng.lat.toFixed(6) : '')+'" placeholder="Latitude e.g. -22.2170"/>' +
@@ -2746,7 +2751,7 @@ function renderMap(){
     html += '<div class="card" style="margin-top:14px"><div class="serif" style="font-weight:600;font-size:15px;margin-bottom:8px">Other tanks pinned ('+others.length+')</div>';
     others.forEach(function(o){
       var hasCoords = o.lat!=null && o.lng!=null && o.lat!=='' && o.lng!=='';
-      if (ui.editingOtherTankId === o.id) {
+      if (isMapAdmin && ui.editingOtherTankId === o.id) {
         html += '<div style="padding:10px 0;border-top:1px solid '+C.line+'">' +
           '<label class="label">Name / owner / area</label><input id="eot-name-'+o.id+'" class="field" style="margin-bottom:8px" value="'+esc(o.name)+'"/>' +
           '<label class="label">Description / notes</label><textarea id="eot-notes-'+o.id+'" class="field" style="margin-bottom:10px;min-height:56px;resize:vertical">'+esc(o.notes||'')+'</textarea>' +
@@ -2761,8 +2766,8 @@ function renderMap(){
           '<div class="mono" style="color:'+C.inkSoft+';font-size:11px">'+esc(o.lat)+', '+esc(o.lng)+'</div>' +
           (o.notes ? '<div style="color:'+C.inkSoft+';font-size:11px;margin-top:1px">'+esc(o.notes)+'</div>' : '') +
           '</div>' +
-          '<button data-action="edit-other-tank" data-id="'+o.id+'" style="flex-shrink:0;background:none;border:none;color:'+C.tank+';display:flex;padding:4px">'+icon('pencil',14,C.tank)+'</button>' +
-          '<button data-action="delete-other-tank" data-id="'+o.id+'" style="flex-shrink:0;background:none;border:none;color:'+C.crisis+';display:flex;padding:4px">'+icon('trash',14,C.crisis)+'</button>' +
+          (isMapAdmin ? '<button data-action="edit-other-tank" data-id="'+o.id+'" style="flex-shrink:0;background:none;border:none;color:'+C.tank+';display:flex;padding:4px">'+icon('pencil',14,C.tank)+'</button>' +
+          '<button data-action="delete-other-tank" data-id="'+o.id+'" style="flex-shrink:0;background:none;border:none;color:'+C.crisis+';display:flex;padding:4px">'+icon('trash',14,C.crisis)+'</button>' : '') +
           '</div>';
       }
     });
@@ -3449,7 +3454,7 @@ function switchTab(tab){
 var ADMIN_ONLY_ACTIONS = {
   'edit-tank': 1, 'delete-tank': 1, 'toggle-income-enabled': 1,
   'toggle-add-tank': 1, 'save-new-tank': 1,
-  'edit-other-tank': 1, 'delete-other-tank': 1, 'save-other-tank': 1, 'toggle-add-other-tank': 1,
+  'edit-other-tank': 1, 'delete-other-tank': 1, 'save-other-tank': 1, 'toggle-add-other-tank': 1, 'save-edit-other-tank': 1,
   'edit-reading': 1, 'delete-reading': 1, 'save-edit-reading': 1,
   'edit-collection': 1, 'delete-collection': 1, 'save-edit-collection': 1,
   'edit-refill': 1, 'delete-refill': 1, 'save-edit-refill': 1,
@@ -3460,7 +3465,9 @@ var ADMIN_ONLY_ACTIONS = {
   'delete-loan': 1, 'delete-loan-payment': 1, 'mark-loan-bad-debt': 1,
   'record-loan-payment': 1, 'toggle-loan': 1, 'record-bad-debt-recovery': 1, 'save-bad-debt-recovery': 1,
   'toggle-acct-form': 1, 'save-acct-deposit': 1, 'save-acct-income': 1, 'save-acct-transfer': 1, 'save-acct-withdraw': 1,
-  'toggle-tithe-form': 1, 'save-tithe-withdraw': 1, 'tithe-withdraw-max': 1
+  'toggle-tithe-form': 1, 'save-tithe-withdraw': 1, 'tithe-withdraw-max': 1,
+  'open-set-pin': 1, 'open-remove-pin': 1, 'open-reset-all': 1,
+  'download-backup': 1, 'trigger-restore': 1
 };
 document.addEventListener('click', function(e){
   var el = e.target.closest('[data-action]');
