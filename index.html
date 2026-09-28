@@ -6,9 +6,6 @@
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="theme-color" content="#0B1E4D" />
-<link rel="manifest" href="manifest.webmanifest" />
-<link rel="apple-touch-icon" href="apple-touch-icon.png" />
-<meta name="apple-mobile-web-app-title" content="FW2 Tanks" />
 <title>FW2 Tank Ledger</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%232454E0'/%3E%3Cstop offset='100%25' stop-color='%230B1E4D'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='22' fill='url(%23g)'/%3E%3Cpath d='M50 20s24 28 24 44a24 24 0 0 1-48 0c0-16 24-44 24-44z' fill='%23fff' opacity='0.95'/%3E%3Cellipse cx='42' cy='58' rx='5' ry='7' fill='%232454E0' opacity='0.5'/%3E%3C/svg%3E" />
 <style>
@@ -158,11 +155,6 @@
 </div>
 <div id="app" style="display:none"></div>
 
-<script>
-if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-  window.addEventListener('load', function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); });
-}
-</script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
@@ -238,11 +230,58 @@ function startAppForUser(user){
       applyTheme(getStoredTheme());
       render();
       listenForRemoteChanges();
+      startStaffLocationTracking();
+      listenForStaffLocations();
     }).catch(function(err){
       showAuthError('Could not load business data: ' + err.message);
     });
   }).catch(function(err){
     showAuthError('Could not load your account: ' + err.message);
+  });
+}
+
+// ---------- staff location tracking ----------
+// Salespersons and managers quietly report their live GPS position while the app is
+// open; admin sees everyone's last-known spot as a marker on the Map tab. This is a
+// separate Firestore collection (not the users doc) so a non-admin can write their own
+// location without needing broader write access to their user profile.
+var staffLocationWatchId = null;
+var lastStaffLocationWriteAt = 0;
+var staffLocationsData = {}; // uid -> {name, role, lat, lng, updatedAt}
+var staffLocationsUnsub = null;
+var STAFF_LOCATION_MIN_INTERVAL_MS = 20000; // don't write more than once every 20s
+
+function startStaffLocationTracking(){
+  if (!currentUser || currentUser.role === 'admin') return; // only staff being tracked report; admin doesn't report their own
+  if (!navigator.geolocation) return;
+  if (staffLocationWatchId !== null) return; // already tracking
+  staffLocationWatchId = navigator.geolocation.watchPosition(function(pos){
+    var now = Date.now();
+    if (now - lastStaffLocationWriteAt < STAFF_LOCATION_MIN_INTERVAL_MS) return;
+    lastStaffLocationWriteAt = now;
+    db.collection('staffLocations').doc(currentUser.uid).set({
+      name: currentUser.name, role: currentUser.role,
+      lat: pos.coords.latitude, lng: pos.coords.longitude,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true }).catch(function(err){ console.error('Location report failed:', err); });
+  }, function(err){ console.error('Geolocation error:', err); }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 });
+}
+function stopStaffLocationTracking(){
+  if (staffLocationWatchId !== null && navigator.geolocation) { navigator.geolocation.clearWatch(staffLocationWatchId); }
+  staffLocationWatchId = null;
+  // Note: we deliberately do NOT delete the Firestore doc here — the marker should
+  // keep showing this person's last-known spot on the map even after they sign out.
+}
+
+// Admin-only: keeps a live map of every staff member's last-known location.
+function listenForStaffLocations(){
+  if (!currentUser || currentUser.role !== 'admin') return;
+  if (staffLocationsUnsub) return; // already listening
+  staffLocationsUnsub = db.collection('staffLocations').onSnapshot(function(snap){
+    var next = {};
+    snap.forEach(function(doc){ next[doc.id] = doc.data(); });
+    staffLocationsData = next;
+    if (ui.tab === 'map' && leafletMap) initMap();
   });
 }
 
@@ -288,6 +327,8 @@ auth.onAuthStateChanged(function(user){
   if (user) {
     startAppForUser(user);
   } else {
+    stopStaffLocationTracking();
+    if (staffLocationsUnsub) { staffLocationsUnsub(); staffLocationsUnsub = null; }
     document.getElementById('auth-gate').style.display = 'flex';
     document.getElementById('app').style.display = 'none';
     document.getElementById('auth-submit').disabled = false;
@@ -368,6 +409,15 @@ function monthKey(d){ return d.slice(0,7); }
 function monthLabel(mk){ return new Date(mk+'-01').toLocaleDateString(undefined,{month:'short',year:'2-digit'}); }
 function rand(n){ return '$' + Math.round(n).toLocaleString(); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function timeAgoLabel(ms){
+  var mins = Math.floor(ms / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + (mins===1?' min':' mins');
+  var hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + (hrs===1?' hour':' hours');
+  var days = Math.floor(hrs / 24);
+  return days + (days===1?' day':' days');
+}
 // Normalizes a locally-entered number (e.g. "0771234567" or "+263771234567" or
 // "263 77 123 4567") into the digits-only international format wa.me needs.
 // A leading 0 is treated as the Zimbabwean trunk prefix and swapped for 263.
@@ -1969,9 +2019,12 @@ function renderTanks(){
     html += '<button data-action="toggle-add-tank" style="display:flex;align-items:center;justify-content:center;gap:8px;border:1px dashed '+C.tank+';border-radius:14px;background:'+C.surface+';color:'+C.tank+';font-weight:600;font-size:14px;padding:12px">'+icon('plus',17,C.tank)+' Add a new tank</button>';
   }
 
-  // Every role (admin, manager, salesperson) sees every tank; edit controls are
-  // hidden separately for non-admins, so salespersons get a read-only view of all tanks.
-  var visibleTanks = state.tanks;
+  var visibleTanks = (currentUser && currentUser.role === 'salesperson')
+    ? state.tanks.filter(function(t){ return (t.salesperson||'').trim().toLowerCase() === (currentUser.name||'').trim().toLowerCase(); })
+    : state.tanks;
+  if (currentUser && currentUser.role === 'salesperson' && !visibleTanks.length) {
+    html += '<div class="card" style="text-align:center;color:'+C.inkSoft+';font-size:13px">No tank is assigned to your account yet. Ask your admin to set the "Salesperson" field on your tank to match your login name exactly.</div>';
+  }
   visibleTanks.forEach(function(t){
     var rate = tankRate(t.id);
     var tReadings = state.readings.filter(function(r){ return r.tankId===t.id; }).sort(function(a,b){ return new Date(b.date)-new Date(a.date); }).slice(0,5);
@@ -2705,6 +2758,27 @@ function initMap(){
     leafletMap.setView([-22.2170, 30.0022], 12); // placeholder view until your location (or a tank) is found
   }
 
+  // Staff location markers (admin only) — one per person who has ever reported a
+  // position, using their last-known spot even if they're offline right now.
+  if (currentUser && currentUser.role === 'admin') {
+    Object.keys(staffLocationsData).forEach(function(uid){
+      var s = staffLocationsData[uid];
+      if (s.lat == null || s.lng == null) return;
+      var ageMs = s.updatedAt && s.updatedAt.toDate ? (Date.now() - s.updatedAt.toDate().getTime()) : null;
+      var isRecent = ageMs !== null && ageMs < 5 * 60 * 1000; // seen in the last 5 minutes = "live"
+      var initials = (s.name||'?').trim().split(/\s+/).map(function(w){ return w[0]; }).slice(0,2).join('').toUpperCase();
+      var dotColor = isRecent ? '#1FA35C' : '#8A8F98';
+      var staffIcon = L.divIcon({
+        className: '',
+        html: '<div style="width:30px;height:30px;border-radius:50%;background:'+dotColor+';border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:11px">'+esc(initials)+'</div>',
+        iconSize: [30,30], iconAnchor: [15,15]
+      });
+      var seenLabel = ageMs === null ? '' : isRecent ? 'Live' : ('Last seen ' + timeAgoLabel(ageMs) + ' ago');
+      var marker = L.marker([parseFloat(s.lat), parseFloat(s.lng)], { icon: staffIcon }).addTo(leafletMap);
+      marker.bindPopup('<strong>'+esc(s.name||'Unknown')+'</strong> ('+esc(s.role||'')+')<br/>'+seenLabel);
+    });
+  }
+
   startLocationWatch(allPts.length === 0 && !ui.pendingOtherTankLatLng);
 
   setTimeout(function(){ if (leafletMap) leafletMap.invalidateSize(); }, 150);
@@ -2719,7 +2793,7 @@ function renderMap(){
     '<div class="serif" style="font-weight:600;font-size:17px">Tank locations</div>' +
     '<button data-action="locate-me" style="flex-shrink:0;display:flex;align-items:center;gap:5px;border:1px solid '+C.line+';border-radius:8px;background:'+C.surface+';color:'+C.tank+';font-weight:600;font-size:11.5px;padding:6px 9px">'+icon('pin',13,C.tank)+' My location</button>' +
     '</div>' +
-    '<div style="font-size:12px;color:'+C.inkSoft+';margin-bottom:6px">Switch between street and satellite with the layers icon on the map. Blue pins are your tanks (add coordinates from the Tanks tab); amber markers below are tanks that aren\'t yours.'+(isMapAdmin ? ' Long-press (or right-click) anywhere on the map to drop a pin for one — drag it to fine-tune, then name it below.' : '')+'</div>' +
+    '<div style="font-size:12px;color:'+C.inkSoft+';margin-bottom:6px">Switch between street and satellite with the layers icon on the map. Blue pins are your tanks (add coordinates from the Tanks tab); amber markers below are tanks that aren\'t yours.'+(isMapAdmin ? ' Long-press (or right-click) anywhere on the map to drop a pin for one — drag it to fine-tune, then name it below. Green initials markers are salespersons/managers currently signed in; grey ones show their last-known location while offline.' : '')+'</div>' +
     '<div id="location-status" style="font-size:11.5px;color:'+C.inkSoft+';min-height:15px;margin-bottom:6px"></div>' +
     '<div id="leaflet-map" style="height:420px;border-radius:14px;overflow:hidden;background:'+C.paper+'"></div>' +
     '</div>';
