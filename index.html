@@ -1784,7 +1784,9 @@ function renderDrawer(){
 
   var resetBody =
     '<div style="font-size:12.5px;color:'+C.inkSoft+';margin-bottom:12px">Permanently erase every tank, reading, collection, refill, cleaning, water test, loan, and account on this phone, and turn off PIN protection. This can\'t be undone — download a backup first if you might need this data again.</div>' +
-    '<button data-action="open-reset-all" style="width:100%;border:1px solid '+C.crisis+';border-radius:10px;background:'+C.surface+';color:'+C.crisis+';font-weight:600;font-size:13px;padding:10px;display:flex;align-items:center;justify-content:center;gap:6px">'+icon('trash',16,C.crisis)+' Reset all data</button>';
+    (isAdminUser
+      ? '<button data-action="open-reset-all" style="width:100%;border:1px solid '+C.crisis+';border-radius:10px;background:'+C.surface+';color:'+C.crisis+';font-weight:600;font-size:13px;padding:10px;display:flex;align-items:center;justify-content:center;gap:6px">'+icon('trash',16,C.crisis)+' Reset all data</button>'
+      : '<div style="font-size:12.5px;color:'+C.inkSoft+'">Only an admin can reset app data.</div>');
 
   var appearanceBody =
     '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px">' +
@@ -3449,7 +3451,7 @@ var ADMIN_ONLY_ACTIONS = {
   'export-excel': 1,
   'toggle-add-other-tank': 1, 'save-other-tank': 1, 'edit-other-tank': 1, 'delete-other-tank': 1,
   'save-edit-other-tank': 1, 'use-my-location-other': 1,
-  'open-set-pin': 1, 'open-remove-pin': 1, 'download-backup': 1, 'trigger-restore': 1
+  'open-set-pin': 1, 'open-remove-pin': 1, 'download-backup': 1, 'trigger-restore': 1, 'open-reset-all': 1
 };
 document.addEventListener('click', function(e){
   var el = e.target.closest('[data-action]');
