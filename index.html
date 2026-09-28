@@ -2030,7 +2030,7 @@ function renderTanks(){
 
       var daysSinceActivity = daysSinceTankActivity(t);
       var lastActivity = lastTankActivityDate(t);
-      if (daysSinceActivity >= 4) {
+      if (daysSinceActivity >= 4 && !(currentUser && currentUser.role === 'manager')) {
         html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:'+C.amber+'14;border-radius:10px;padding:8px 10px;margin-top:8px">' +
           '<div style="font-size:11.5px;color:'+C.inkSoft+'">Not visited in '+Math.floor(daysSinceActivity)+' days — last logged '+esc(lastActivity)+'.</div>' +
           '<button data-action="goto-log-reading" data-tank="'+esc(t.id)+'" style="flex-shrink:0;background:none;border:none;color:'+C.amber+';font-weight:600;font-size:12px;white-space:nowrap">Log one →</button>' +
@@ -2056,10 +2056,11 @@ function renderTanks(){
           '<div style="font-size:11px;color:'+C.inkSoft+';margin-bottom:8px">' +
           'Last cleaned: '+(t.lastCleanedDate ? t.lastCleanedDate : 'never')+' · Last water test: '+(t.lastWaterTestDate ? (t.lastWaterTestDate+' ('+(t.lastWaterTestResult||'—')+')') : 'never') +
           '</div>' +
+          (currentUser && currentUser.role === 'manager' ? '' :
           '<div style="display:flex;gap:8px">' +
           '<button data-action="goto-log-clean" data-tank="'+esc(t.id)+'" style="flex:1;background:none;border:1px solid '+C.amber+'55;border-radius:9px;padding:7px;font-size:11.5px;font-weight:600;color:'+C.amber+'">Record cleaning</button>' +
           '<button data-action="goto-log-test" data-tank="'+esc(t.id)+'" style="flex:1;background:none;border:1px solid '+C.purple+'55;border-radius:9px;padding:7px;font-size:11.5px;font-weight:600;color:'+C.purple+'">Record water test</button>' +
-          '</div>';
+          '</div>');
         if (tCleaningsAll.length || tWaterTestsAll.length) {
           html += '<div style="margin-top:8px">';
           tCleaningsAll.slice(0,2).forEach(function(c){
@@ -2846,7 +2847,9 @@ function renderLending(){
       '<button data-action="cancel-new-loan" style="flex:0 0 auto;padding:0 16px;border-radius:10px;border:1px solid '+C.line+';background:'+C.surface+';color:'+C.inkSoft+';font-weight:600;font-size:14px">Cancel</button>' +
       '</div></div>';
   } else {
+  if (currentUser && currentUser.role !== 'manager') {
     html += '<button data-action="toggle-add-loan" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;border:1px dashed '+C.tank+';border-radius:14px;background:'+C.surface+';color:'+C.tank+';font-weight:600;font-size:14px;padding:12px;margin-bottom:14px">'+icon('plus',17,C.tank)+' New loan</button>';
+  }
   }
 
   if (!loans.length) {
@@ -2895,7 +2898,7 @@ function renderLending(){
           html += '<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:2px 0">' +
             '<span style="color:'+C.inkSoft+'">'+p.date+'</span>' +
             '<span class="mono" style="color:'+C.cash+';font-weight:600">'+moneyFmt(p.amount, cur)+'</span>' +
-            '<button data-action="delete-loan-payment" data-loan-id="'+l.id+'" data-payment-id="'+p.id+'" style="border:none;background:none;color:'+C.inkSoft+';padding:2px 4px">'+icon('trash',12)+'</button>' +
+            ((currentUser && currentUser.role !== 'manager') ? '<button data-action="delete-loan-payment" data-loan-id="'+l.id+'" data-payment-id="'+p.id+'" style="border:none;background:none;color:'+C.inkSoft+';padding:2px 4px">'+icon('trash',12)+'</button>' : '') +
             '</div>' +
             (tithePortion > 0.005 ? '<div style="font-size:10.5px;color:'+C.gold+';text-align:right;margin-top:-2px">tithe '+moneyFmt(tithePortion, cur)+' of '+moneyFmt(interestPortion, cur)+' interest</div>' : '');
         });
@@ -2931,7 +2934,7 @@ function renderLending(){
           '<button data-action="save-bad-debt-recovery" data-id="'+l.id+'" class="btn-primary btn-cash" style="flex:1">Save recovery</button>' +
           '<button data-action="cancel-bad-debt-recovery" style="flex:0 0 auto;padding:0 16px;border-radius:10px;border:1px solid '+C.line+';background:'+C.surface+';color:'+C.inkSoft+';font-weight:600;font-size:14px">Cancel</button>' +
           '</div></div>';
-      } else {
+      } else if (currentUser && currentUser.role !== 'manager') {
         html += '<div style="display:flex;gap:8px;margin-top:10px">' +
           (!l.cleared && !l.badDebt ? '<button data-action="record-loan-payment" data-id="'+l.id+'" style="flex:1;padding:8px;border-radius:8px;border:1px solid '+C.line+';background:'+C.surface+';color:'+C.tank+';font-weight:600;font-size:12.5px">Record payment</button>' : '') +
           (!l.cleared && !l.badDebt ? '<button data-action="toggle-loan" data-id="'+l.id+'" style="flex:1;padding:8px;border-radius:8px;border:1px solid '+C.line+';background:'+C.surface+';color:'+C.cash+';font-weight:600;font-size:12.5px">'+(paid>0 ? 'Settle remaining' : 'Mark cleared')+'</button>' : '') +
@@ -3372,6 +3375,7 @@ function renderPinModal(){
 
 function render(){
   if (currentUser && currentUser.role === 'salesperson' && (ui.tab === 'lending' || ui.tab === 'account' || ui.tab === 'income')) ui.tab = 'overview';
+  if (currentUser && currentUser.role === 'manager' && ui.tab === 'log') ui.tab = 'overview';
   var loading = false;
   var headerEyebrow = ui.tab==='lending' ? 'Money Lending' : ui.tab==='account' ? 'FW2 Finance' : 'FW2 Water Vending';
   var headerTitle = ui.tab==='lending' ? 'Finance Monitor' : ui.tab==='account' ? 'Business Account' : 'Tank Ledger';
@@ -3400,7 +3404,7 @@ function render(){
 
   var isAdmin = !currentUser || currentUser.role === 'admin' || currentUser.role === 'manager'; // admin and manager both see every tab; fail open only if auth hasn't populated yet
   body += '</div><div class="bottom-nav">' +
-    navBtn('overview','gauge','Overview', C.tank) + navBtn('payments','checklist','Payments', C.crisis) + navBtn('log','log','Log', C.amber) + navBtn('tanks','drop','Tanks', C.tank) + (isAdmin ? navBtn('income','trend','Income', C.cash) : '') + navBtn('graphs','bars','Graphs', C.purple) + navBtn('map','pin','Map', C.mapRed) +
+    navBtn('overview','gauge','Overview', C.tank) + navBtn('payments','checklist','Payments', C.crisis) + ((currentUser && currentUser.role === 'manager') ? '' : navBtn('log','log','Log', C.amber)) + navBtn('tanks','drop','Tanks', C.tank) + (isAdmin ? navBtn('income','trend','Income', C.cash) : '') + navBtn('graphs','bars','Graphs', C.purple) + navBtn('map','pin','Map', C.mapRed) +
     (isAdmin ? navBtn('lending','cash','Lending', C.cash) + navBtn('account','wallet','Account', C.gold) : '') +
     '</div>' + renderConfirmModal() + renderPinModal() + renderDrawer();
 
@@ -3445,6 +3449,7 @@ function switchTab(tab){
 var ADMIN_ONLY_ACTIONS = {
   'edit-tank': 1, 'delete-tank': 1, 'toggle-income-enabled': 1,
   'toggle-add-tank': 1, 'save-new-tank': 1,
+  'edit-other-tank': 1, 'delete-other-tank': 1, 'save-other-tank': 1, 'toggle-add-other-tank': 1,
   'edit-reading': 1, 'delete-reading': 1, 'save-edit-reading': 1,
   'edit-collection': 1, 'delete-collection': 1, 'save-edit-collection': 1,
   'edit-refill': 1, 'delete-refill': 1, 'save-edit-refill': 1,
@@ -3452,6 +3457,8 @@ var ADMIN_ONLY_ACTIONS = {
   'goto-collect': 1, 'save-collection': 1, 'save-refill': 1,
   'export-excel': 1,
   'toggle-add-loan': 1, 'save-loan': 1, 'save-loan-payment': 1,
+  'delete-loan': 1, 'delete-loan-payment': 1, 'mark-loan-bad-debt': 1,
+  'record-loan-payment': 1, 'toggle-loan': 1, 'record-bad-debt-recovery': 1, 'save-bad-debt-recovery': 1,
   'toggle-acct-form': 1, 'save-acct-deposit': 1, 'save-acct-income': 1, 'save-acct-transfer': 1, 'save-acct-withdraw': 1,
   'toggle-tithe-form': 1, 'save-tithe-withdraw': 1, 'tithe-withdraw-max': 1
 };
