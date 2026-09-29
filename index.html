@@ -2694,6 +2694,7 @@ function drawStaffMarkers(){
     Object.keys(staffLocationsData).forEach(function(uid){
       var s = staffLocationsData[uid];
       if (s.lat == null || s.lng == null) return;
+      if (s.role === 'admin') return; // admin isn't tracked; ignore any leftover admin record
       var ageMs = s.updatedAt && s.updatedAt.toDate ? (Date.now() - s.updatedAt.toDate().getTime()) : null;
       var isRecent = ageMs !== null && ageMs < 5 * 60 * 1000; // seen in the last 5 minutes = "live"
       var initials = (s.name||'?').trim().split(/\s+/).map(function(w){ return w[0]; }).slice(0,2).join('').toUpperCase();
