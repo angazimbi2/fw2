@@ -281,7 +281,7 @@ function listenForStaffLocations(){
     var next = {};
     snap.forEach(function(doc){ next[doc.id] = doc.data(); });
     staffLocationsData = next;
-    if (ui.tab === 'map' && leafletMap) initMap();
+    if (ui.tab === 'map' && leafletMap) drawStaffMarkers(); // update markers in place; don't rebuild the map
   });
 }
 
@@ -2592,10 +2592,12 @@ function setLocationStatus(msg, isError){
 
 function updateMeMarker(latlng, accuracy){
   if (!leafletMap) return;
-  if (meMarker) { leafletMap.removeLayer(meMarker); }
-  if (meCircle) { leafletMap.removeLayer(meCircle); }
-  meMarker = L.circleMarker(latlng, { radius: 7, color: '#fff', weight: 2, fillColor: '#1E88E5', fillOpacity: 1 }).addTo(leafletMap).bindPopup('You are here');
-  meCircle = L.circle(latlng, { radius: Math.max(accuracy || 0, 5) / 2, color: '#1E88E5', fillColor: '#1E88E5', fillOpacity: 0.08, weight: 1 }).addTo(leafletMap);
+  var r = Math.max(accuracy || 0, 5) / 2;
+  if (meMarker && meCircle) { meMarker.setLatLng(latlng); meCircle.setLatLng(latlng); meCircle.setRadius(r); }
+  else {
+    meMarker = L.circleMarker(latlng, { radius: 7, color: '#fff', weight: 2, fillColor: '#1E88E5', fillOpacity: 1 }).addTo(leafletMap).bindPopup('You are here');
+    meCircle = L.circle(latlng, { radius: r, color: '#1E88E5', fillColor: '#1E88E5', fillOpacity: 0.08, weight: 1 }).addTo(leafletMap);
+  }
   lastMeLatLng = latlng;
 }
 
@@ -2682,6 +2684,33 @@ function attachMapLongPress(map){
   }, { passive: true });
 }
 
+var staffLayer = null;
+function drawStaffMarkers(){
+  if (!leafletMap) return;
+  if (staffLayer) { staffLayer.clearLayers(); } else { staffLayer = L.layerGroup().addTo(leafletMap); }
+  // Staff location markers (admin only) — one per person who has ever reported a
+  // position, using their last-known spot even if they're offline right now.
+  if (currentUser && currentUser.role === 'admin') {
+    Object.keys(staffLocationsData).forEach(function(uid){
+      var s = staffLocationsData[uid];
+      if (s.lat == null || s.lng == null) return;
+      var ageMs = s.updatedAt && s.updatedAt.toDate ? (Date.now() - s.updatedAt.toDate().getTime()) : null;
+      var isRecent = ageMs !== null && ageMs < 5 * 60 * 1000; // seen in the last 5 minutes = "live"
+      var initials = (s.name||'?').trim().split(/\s+/).map(function(w){ return w[0]; }).slice(0,2).join('').toUpperCase();
+      var dotColor = isRecent ? '#1FA35C' : '#8A8F98';
+      var staffIcon = L.divIcon({
+        className: '',
+        html: '<div style="width:30px;height:30px;border-radius:50%;background:'+dotColor+';border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:11px">'+esc(initials)+'</div>',
+        iconSize: [30,30], iconAnchor: [15,15]
+      });
+      var seenLabel = ageMs === null ? '' : isRecent ? 'Live' : ('Last seen ' + timeAgoLabel(ageMs) + ' ago');
+      var marker = L.marker([parseFloat(s.lat), parseFloat(s.lng)], { icon: staffIcon }).addTo(staffLayer);
+      marker.bindPopup('<strong>'+esc(s.name||'Unknown')+'</strong> ('+esc(s.role||'')+')<br/>'+seenLabel);
+    });
+  }
+
+}
+
 function initMap(){
   var el = document.getElementById('leaflet-map');
   if (!el || typeof L === 'undefined') return;
@@ -2758,26 +2787,7 @@ function initMap(){
     leafletMap.setView([-22.2170, 30.0022], 12); // placeholder view until your location (or a tank) is found
   }
 
-  // Staff location markers (admin only) — one per person who has ever reported a
-  // position, using their last-known spot even if they're offline right now.
-  if (currentUser && currentUser.role === 'admin') {
-    Object.keys(staffLocationsData).forEach(function(uid){
-      var s = staffLocationsData[uid];
-      if (s.lat == null || s.lng == null) return;
-      var ageMs = s.updatedAt && s.updatedAt.toDate ? (Date.now() - s.updatedAt.toDate().getTime()) : null;
-      var isRecent = ageMs !== null && ageMs < 5 * 60 * 1000; // seen in the last 5 minutes = "live"
-      var initials = (s.name||'?').trim().split(/\s+/).map(function(w){ return w[0]; }).slice(0,2).join('').toUpperCase();
-      var dotColor = isRecent ? '#1FA35C' : '#8A8F98';
-      var staffIcon = L.divIcon({
-        className: '',
-        html: '<div style="width:30px;height:30px;border-radius:50%;background:'+dotColor+';border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:11px">'+esc(initials)+'</div>',
-        iconSize: [30,30], iconAnchor: [15,15]
-      });
-      var seenLabel = ageMs === null ? '' : isRecent ? 'Live' : ('Last seen ' + timeAgoLabel(ageMs) + ' ago');
-      var marker = L.marker([parseFloat(s.lat), parseFloat(s.lng)], { icon: staffIcon }).addTo(leafletMap);
-      marker.bindPopup('<strong>'+esc(s.name||'Unknown')+'</strong> ('+esc(s.role||'')+')<br/>'+seenLabel);
-    });
-  }
+  staffLayer = null; drawStaffMarkers();
 
   startLocationWatch(allPts.length === 0 && !ui.pendingOtherTankLatLng);
 
