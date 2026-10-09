@@ -182,6 +182,9 @@ var db = firebase.firestore();
 var SHARED_STATE_DOC = db.collection('appState').doc('shared');
 
 var currentUser = null; // { uid, role, name }
+// 'agent' = field lending agent. Sees ONLY the Lending tab: the balance in hand, the borrowers'
+// account details, and can add a new loan. Cannot record payments, clear, write off or delete.
+function isAgentUser(){ return !!(currentUser && currentUser.role === 'agent'); }
 var saveDebounceTimer = null;
 var applyingRemoteUpdate = false; // guards against the snapshot listener clobbering a local edit-in-progress
 
@@ -350,7 +353,7 @@ var THEMES = {
 };
 var C = Object.assign({}, THEME_BASE, THEMES.light);
 var APP_CREATED_LABEL = 'August 2026';
-var APP_VERSION = '1.3';
+var APP_VERSION = '1.4';
 var THEME_KEY = 'tank-ledger-theme-v1';
 function getStoredTheme(){
   try { return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light'; } catch(e) { return 'light'; }
@@ -869,7 +872,8 @@ function renderPayments(){
 var DEFAULT_INTEREST = 0.4; // 40%
 
 function addLoan(name, amountBorrowed, dateBorrowed, dateDue, amountDue, currency, whatsapp, lateFeePct, skipAccountTx){
-  var entry = { id: uid(), name: name, whatsapp: whatsapp||'', amountBorrowed: amountBorrowed, dateBorrowed: dateBorrowed, dateDue: dateDue, amountDue: amountDue, currency: currency || 'USD', cleared: false, dateCleared: null, lateFeePct: lateFeePct||0, payments: [], titheAccrued: false };
+  var entry = { id: uid(), name: name, whatsapp: whatsapp||'', amountBorrowed: amountBorrowed, dateBorrowed: dateBorrowed, dateDue: dateDue, amountDue: amountDue, currency: currency || 'USD', cleared: false, dateCleared: null, lateFeePct: lateFeePct||0, payments: [], titheAccrued: false,
+    addedBy: currentUser ? currentUser.name : '', addedByRole: currentUser ? currentUser.role : '' };
   state.loans = state.loans.concat([entry]).sort(function(a,b){ return new Date(a.dateDue)-new Date(b.dateDue); });
   // Issuing a loan is money leaving the Business Account — deducted automatically.
   // Exception: backdated entries, where the cash already left before the account's
@@ -2948,8 +2952,16 @@ function renderWaQueue(){
   return html + '</div>';
 }
 
+function renderAgentBalance(){
+  var t = computeAccountTotals('USD');
+  return '<div style="margin-bottom:14px">' + statCard('Balance in hand', moneyFmt(t.balance, 'USD'), 'available to lend out', t.balance>=0?C.cash:C.crisis) + '</div>';
+}
+
 function renderLending(){
-  var viewOnlyBanner = (currentUser && currentUser.role === 'manager')
+  var isAgent = isAgentUser();
+  var viewOnlyBanner = isAgent
+    ? '<div class="card" style="background:'+C.surface+';border:1px dashed '+C.line+';color:'+C.inkSoft+';font-size:12.5px;text-align:center">Agent access — you can view borrowers and add new loans. Payments and clearing loans are handled by Admin.</div>'
+    : (currentUser && currentUser.role === 'manager')
     ? '<div class="card" style="background:'+C.surface+';border:1px dashed '+C.line+';color:'+C.inkSoft+';font-size:12.5px;text-align:center">View only — editing loans is restricted to Admin.</div>'
     : '';
   var hasUSD = state.loans.some(function(l){ return l.currency === 'USD'; });
@@ -2960,7 +2972,7 @@ function renderLending(){
     return new Date(a.dateDue) - new Date(b.dateDue);
   });
 
-  var html = viewOnlyBanner + renderWaQueue() + renderCurrencyStats('USD', 'US Dollar ($)');
+  var html = viewOnlyBanner + (isAgent ? renderAgentBalance() : renderWaQueue() + renderCurrencyStats('USD', 'US Dollar ($)'));
 
   if (ui.addingLoan) {
     html += '<div class="card" style="margin-bottom:14px">' +
@@ -2982,17 +2994,19 @@ function renderLending(){
       '<div style="font-size:11.5px;color:'+C.inkSoft+';margin-bottom:12px">Fills in automatically from the interest rate above — set it to 0 for an interest-free loan, or edit the amount directly for a custom deal.</div>' +
       '<label class="label">Late fee (%/day after due date)</label><input id="ln-latefee" type="number" min="0" step="0.1" class="field mono" value="0" style="margin-bottom:6px"/>' +
       '<div style="font-size:11.5px;color:'+C.inkSoft+';margin-bottom:12px">Optional. Charged daily on whatever balance is still outstanding once a loan goes past its due date — leave at 0 for no late fee.</div>' +
+      (isAgent ? '' : (
       '<label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:12px;cursor:pointer">' +
       '<input id="ln-backdated" type="checkbox" style="margin-top:3px"/>' +
       '<span style="font-size:12.5px;color:'+C.inkSoft+'">Backdated entry — this money already left the account before it was tracked here. Don\'t deduct it again.</span>' +
-      '</label>' +
+      '</label>'
+      )) +
       (ui.msg ? '<div style="font-size:12.5px;color:'+C.inkSoft+';margin-bottom:10px">'+esc(ui.msg)+'</div>' : '') +
       '<div style="display:flex;gap:8px">' +
       '<button data-action="save-loan" class="btn-primary" style="flex:1">'+icon('plus',17,'#fff')+' Add loan</button>' +
       '<button data-action="cancel-new-loan" style="flex:0 0 auto;padding:0 16px;border-radius:10px;border:1px solid '+C.line+';background:'+C.surface+';color:'+C.inkSoft+';font-weight:600;font-size:14px">Cancel</button>' +
       '</div></div>';
   } else {
-  if (currentUser && currentUser.role !== 'manager') {
+  if (isAgent || (currentUser && currentUser.role !== 'manager')) {
     html += '<button data-action="toggle-add-loan" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;border:1px dashed '+C.tank+';border-radius:14px;background:'+C.surface+';color:'+C.tank+';font-weight:600;font-size:14px;padding:12px;margin-bottom:14px">'+icon('plus',17,C.tank)+' New loan</button>';
   }
   }
@@ -3018,12 +3032,14 @@ function renderLending(){
         '<div style="display:flex;align-items:center;gap:6px"><div style="font-weight:600;font-size:15px">'+esc(l.name)+'</div>' +
         (cur==='USD' ? '<span style="font-size:10px;font-weight:700;color:'+C.tank+';border:1px solid '+C.tank+';border-radius:5px;padding:1px 5px">USD</span>' : '') +
         '</div>' +
-        (l.whatsapp ? '<a href="'+waLink(l.whatsapp)+'" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;color:#25D366;font-weight:600;font-size:11.5px;background:#25D36614;border-radius:999px;padding:2px 9px 2px 7px;margin-top:3px">'+icon('whatsapp',12,'#25D366')+' Chat on WhatsApp</a>' : '') +
+        (l.whatsapp && !isAgent ? '<a href="'+waLink(l.whatsapp)+'" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;color:#25D366;font-weight:600;font-size:11.5px;background:#25D36614;border-radius:999px;padding:2px 9px 2px 7px;margin-top:3px">'+icon('whatsapp',12,'#25D366')+' Chat on WhatsApp</a>' : '') +
         '<div style="font-size:12px;color:'+C.inkSoft+'">Borrowed '+moneyFmt(l.amountBorrowed, cur)+' on '+l.dateBorrowed+'</div>' +
         '<div style="font-size:12px;color:'+C.inkSoft+'">Due '+moneyFmt(l.amountDue, cur)+' by '+l.dateDue+' <span style="color:'+C.inkSoft+'">('+Math.round((l.amountDue/l.amountBorrowed - 1)*100)+'% interest)</span></div>' +
+        (isAgent ? '<div style="font-size:12px;color:'+C.inkSoft+'">Period: '+Math.max(Math.round((new Date(l.dateDue)-new Date(l.dateBorrowed))/86400000),0)+' days</div>' : '') +
+        (!isAgent && l.addedByRole === 'agent' ? '<div style="font-size:11.5px;color:'+C.inkSoft+'">Added by agent '+esc(l.addedBy||'')+'</div>' : '') +
         (lateFee > 0.5 ? '<div style="font-size:12px;color:'+C.crisis+'">+'+moneyFmt(lateFee, cur)+' late fee ('+daysOver+' day'+(daysOver===1?'':'s')+' overdue @ '+(l.lateFeePct||0)+'%/day)</div>' : '') +
         (paid > 0 ? '<div style="font-size:12px;color:'+C.cash+'">Paid so far: '+moneyFmt(paid, cur)+'</div>' : '') +
-        (!l.cleared && !l.badDebt && (paid > 0 || lateFee > 0.5) ? '<div style="font-size:12.5px;font-weight:600">Balance remaining: '+moneyFmt(balance, cur)+'</div>' : '') +
+        (!l.cleared && !l.badDebt && (isAgent || paid > 0 || lateFee > 0.5) ? '<div style="font-size:12.5px;font-weight:600">Balance remaining: '+moneyFmt(balance, cur)+'</div>' : '') +
         (l.cleared && l.dateCleared ? '<div style="font-size:11.5px;color:'+C.cash+'">Cleared '+l.dateCleared+'</div>' : '') +
         (l.badDebt ? '<div style="font-size:11.5px;color:'+C.crisis+'">Written off '+esc(l.dateBadDebt)+' — '+moneyFmt(l.badDebtAmount||0, cur)+' lost</div>' : '') +
         '</div>' +
@@ -3043,9 +3059,9 @@ function renderLending(){
           html += '<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:2px 0">' +
             '<span style="color:'+C.inkSoft+'">'+p.date+'</span>' +
             '<span class="mono" style="color:'+C.cash+';font-weight:600">'+moneyFmt(p.amount, cur)+'</span>' +
-            ((currentUser && currentUser.role !== 'manager') ? '<button data-action="delete-loan-payment" data-loan-id="'+l.id+'" data-payment-id="'+p.id+'" style="border:none;background:none;color:'+C.inkSoft+';padding:2px 4px">'+icon('trash',12)+'</button>' : '') +
+            ((currentUser && currentUser.role !== 'manager' && !isAgent) ? '<button data-action="delete-loan-payment" data-loan-id="'+l.id+'" data-payment-id="'+p.id+'" style="border:none;background:none;color:'+C.inkSoft+';padding:2px 4px">'+icon('trash',12)+'</button>' : '') +
             '</div>' +
-            (tithePortion > 0.005 ? '<div style="font-size:10.5px;color:'+C.gold+';text-align:right;margin-top:-2px">tithe '+moneyFmt(tithePortion, cur)+' of '+moneyFmt(interestPortion, cur)+' interest</div>' : '');
+            (tithePortion > 0.005 && !isAgent ? '<div style="font-size:10.5px;color:'+C.gold+';text-align:right;margin-top:-2px">tithe '+moneyFmt(tithePortion, cur)+' of '+moneyFmt(interestPortion, cur)+' interest</div>' : '');
         });
         html += '</div>';
       }
@@ -3079,7 +3095,7 @@ function renderLending(){
           '<button data-action="save-bad-debt-recovery" data-id="'+l.id+'" class="btn-primary btn-cash" style="flex:1">Save recovery</button>' +
           '<button data-action="cancel-bad-debt-recovery" style="flex:0 0 auto;padding:0 16px;border-radius:10px;border:1px solid '+C.line+';background:'+C.surface+';color:'+C.inkSoft+';font-weight:600;font-size:14px">Cancel</button>' +
           '</div></div>';
-      } else if (currentUser && currentUser.role !== 'manager') {
+      } else if (currentUser && currentUser.role !== 'manager' && !isAgent) {
         html += '<div style="display:flex;gap:8px;margin-top:10px">' +
           (!l.cleared && !l.badDebt ? '<button data-action="record-loan-payment" data-id="'+l.id+'" style="flex:1;padding:8px;border-radius:8px;border:1px solid '+C.line+';background:'+C.surface+';color:'+C.tank+';font-weight:600;font-size:12.5px">Record payment</button>' : '') +
           (!l.cleared && !l.badDebt ? '<button data-action="toggle-loan" data-id="'+l.id+'" style="flex:1;padding:8px;border-radius:8px;border:1px solid '+C.line+';background:'+C.surface+';color:'+C.cash+';font-weight:600;font-size:12.5px">'+(paid>0 ? 'Settle remaining' : 'Mark cleared')+'</button>' : '') +
@@ -3519,6 +3535,7 @@ function renderPinModal(){
 }
 
 function render(){
+  if (isAgentUser()) ui.tab = 'lending';
   if (currentUser && currentUser.role === 'salesperson' && (ui.tab === 'lending' || ui.tab === 'account' || ui.tab === 'income')) ui.tab = 'overview';
   if (currentUser && currentUser.role === 'manager' && ui.tab === 'log') ui.tab = 'overview';
   var loading = false;
@@ -3544,13 +3561,14 @@ function render(){
   else if (ui.tab==='income') body += (pinIsSet() && !ui.unlockedTabs.income) ? renderLockedTab('income','Income') : renderIncome();
   else if (ui.tab==='graphs') body += renderGraphs();
   else if (ui.tab==='map') body += renderMap();
-  else if (ui.tab==='lending') body += (pinIsSet() && !ui.unlockedTabs.lending) ? renderLockedTab('lending','Lending') : renderLending();
+  else if (ui.tab==='lending') body += (pinIsSet() && !ui.unlockedTabs.lending && !isAgentUser()) ? renderLockedTab('lending','Lending') : renderLending();
   else if (ui.tab==='account') body += (pinIsSet() && !ui.unlockedTabs.account) ? renderLockedTab('account','Account') : renderAccount();
 
   var isAdmin = !currentUser || currentUser.role === 'admin' || currentUser.role === 'manager'; // admin and manager both see every tab; fail open only if auth hasn't populated yet
-  body += '</div><div class="bottom-nav">' +
+  var navInner = isAgentUser() ? navBtn('lending','cash','Lending', C.cash) :
     navBtn('overview','gauge','Overview', C.tank) + navBtn('payments','checklist','Payments', C.crisis) + ((currentUser && currentUser.role === 'manager') ? '' : navBtn('log','log','Log', C.amber)) + navBtn('tanks','drop','Tanks', C.tank) + (isAdmin ? navBtn('income','trend','Income', C.cash) : '') + navBtn('graphs','bars','Graphs', C.purple) + navBtn('map','pin','Map', C.mapRed) +
-    (isAdmin ? navBtn('lending','cash','Lending', C.cash) + navBtn('account','wallet','Account', C.gold) : '') +
+    (isAdmin ? navBtn('lending','cash','Lending', C.cash) + navBtn('account','wallet','Account', C.gold) : '');
+  body += '</div><div class="bottom-nav">' + navInner +
     '</div>' + renderConfirmModal() + renderPinModal() + renderDrawer();
 
   document.getElementById('app').innerHTML = body;
@@ -3591,6 +3609,12 @@ function switchTab(tab){
 // every tab (Income, Lending, Account included) but can't edit, add, delete,
 // collect, refill, or open any of the money-moving forms; salespersons additionally
 // stay off the Income/Lending/Account tabs entirely (see the tab redirect above).
+// The ONLY actions an agent login may trigger. Anything not listed here is ignored for agents,
+// so even a stale button or a hand-crafted click can't clear, pay, write off or delete a loan.
+var AGENT_ALLOWED_ACTIONS = {
+  'set-tab': 1, 'sign-out': 1, 'toggle-drawer': 1, 'close-drawer': 1, 'toggle-drawer-section': 1, 'toggle-theme': 1,
+  'toggle-add-loan': 1, 'cancel-new-loan': 1, 'set-due-quick': 1, 'save-loan': 1
+};
 var ADMIN_ONLY_ACTIONS = {
   'edit-tank': 1, 'delete-tank': 1, 'toggle-income-enabled': 1,
   'toggle-add-tank': 1, 'save-new-tank': 1,
@@ -3614,7 +3638,10 @@ document.addEventListener('click', function(e){
   if (!el) return;
   var action = el.getAttribute('data-action');
   var isNonAdmin = currentUser && currentUser.role !== 'admin'; // blocks edits/deletes/collect/refill for managers and salespersons alike
-  if (isNonAdmin && ADMIN_ONLY_ACTIONS[action]) return;
+  if (isAgentUser()) {
+    if (!AGENT_ALLOWED_ACTIONS[action]) return;
+    if (action === 'set-tab' && el.getAttribute('data-tab') !== 'lending') return;
+  } else if (isNonAdmin && ADMIN_ONLY_ACTIONS[action]) return;
   if (isNonAdmin && action === 'log-mode') {
     var reqMode = el.getAttribute('data-mode');
     if (reqMode === 'collect' || reqMode === 'refill') return;
@@ -4004,7 +4031,7 @@ document.addEventListener('click', function(e){
     var lnLateFeeEl = document.getElementById('ln-latefee');
     var lnLateFeePct = lnLateFeeEl ? (parseFloat(lnLateFeeEl.value) || 0) : 0;
     var lnBackdated = document.getElementById('ln-backdated');
-    var lnSkipAccountTx = lnBackdated ? lnBackdated.checked : false;
+    var lnSkipAccountTx = (lnBackdated && !isAgentUser()) ? lnBackdated.checked : false;
     if (!lnName) { ui.msg = 'Enter the borrower\'s name.'; render(); return; }
     if (!lnAmount || lnAmount <= 0) { ui.msg = 'Enter a valid amount borrowed.'; render(); return; }
     if (!lnDueDate) { ui.msg = 'Set a due date (or tap +2 weeks / +1 month).'; render(); return; }
@@ -4170,6 +4197,7 @@ document.addEventListener('blur', function(e){
     var dx = t.clientX - startX, dy = t.clientY - startY;
     var dt = Date.now() - startTime;
     if (dt > MAX_DURATION || Math.abs(dy) > MAX_OFF_AXIS || Math.abs(dx) < SWIPE_DISTANCE) return;
+    if (isAgentUser()) return;
     var idx = TAB_ORDER.indexOf(ui.tab);
     if (idx === -1) return;
     if (dx < 0 && idx < TAB_ORDER.length - 1) switchTab(TAB_ORDER[idx + 1]); // swipe left -> next tab

@@ -4,7 +4,7 @@
 // - Firebase / Leaflet scripts: stale-while-revalidate, so the app still opens offline.
 // - Firestore, Auth and map tile requests are never touched.
 // Bump CACHE_VERSION whenever you want to force every phone to drop old caches.
-var CACHE_VERSION = 'v1';
+var CACHE_VERSION = 'v2';
 var SHELL_CACHE = 'fw2-shell-' + CACHE_VERSION;
 var LIB_CACHE = 'fw2-libs-' + CACHE_VERSION;
 var SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
