@@ -134,6 +134,30 @@
     background: none; border: none; padding: 0; text-align: left; color: var(--ink);
   }
   .collapse-card-body { overflow: hidden; }
+
+  /* ---------- desktop / mobile views (auto-detected, see detectViewMode) ---------- */
+  .ov-grid { display: grid; grid-template-columns: minmax(0,1fr); gap: 14px; }
+  .ov-grid > * { margin-bottom: 0 !important; }
+  .sidebar { display: none; }
+  html[data-view="desktop"] .desk-shell { display: flex; min-height: 100vh; }
+  html[data-view="desktop"] .sidebar {
+    display: flex; flex-direction: column; width: 244px; flex-shrink: 0; position: sticky; top: 0; height: 100vh;
+    padding: 24px 14px 18px; border-right: 1px solid var(--nav-border); background: var(--nav-bg);
+    backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4); overflow-y: auto;
+  }
+  html[data-view="desktop"] .side-brand { display: flex; align-items: center; gap: 11px; padding: 0 6px 18px; border-bottom: 1px solid var(--line); }
+  html[data-view="desktop"] .side-nav { display: flex; flex-direction: column; gap: 4px; margin-top: 16px; flex: 1; }
+  html[data-view="desktop"] .sidebar .nav-btn { flex: none; width: 100%; flex-direction: row; justify-content: flex-start; gap: 12px; padding: 8px 10px; text-align: left; }
+  html[data-view="desktop"] .sidebar .nav-btn > span:last-child { font-size: 14px !important; letter-spacing: 0; }
+  html[data-view="desktop"] .sidebar .nav-btn:hover { box-shadow: inset 0 0 0 1px var(--card-border); }
+  html[data-view="desktop"] .side-foot { border-top: 1px solid var(--line); padding: 14px 6px 0; font-size: 12.5px; }
+  html[data-view="desktop"] .desk-main { flex: 1; min-width: 0; }
+  html[data-view="desktop"] .wrap { max-width: 1060px; padding: 30px 40px 60px; }
+  html[data-view="desktop"] .ov-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18px; grid-auto-flow: dense; }
+  html[data-view="desktop"] .ov-grid > .span2 { grid-column: 1 / -1; }
+  html[data-view="desktop"] .tank-list { display: grid !important; grid-template-columns: repeat(2, minmax(0,1fr)); column-gap: 28px; }
+  html[data-view="desktop"] .log-narrow { max-width: 640px; }
+  html[data-view="desktop"] .card:hover { box-shadow: 0 1px 2px rgba(16,25,43,0.04), 0 14px 30px -14px rgba(16,25,43,0.16); }
   .auth-gate { position: fixed; inset: 0; z-index: 9999; background: var(--bg-top); display: flex; align-items: center; justify-content: center; padding: 20px; }
   .auth-card { width: 100%; max-width: 340px; background: linear-gradient(180deg, var(--card-from), var(--card-to)); border: 1px solid var(--card-border); border-radius: 18px; padding: 28px 22px; box-shadow: 0 20px 40px -20px rgba(11,30,77,0.35); }
   .auth-field { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--field-border); background: var(--field-bg); color: var(--ink); font-size: 15px; margin-bottom: 12px; }
@@ -185,6 +209,42 @@ var currentUser = null; // { uid, role, name }
 // 'agent' = field lending agent. Sees ONLY the Lending tab: the balance in hand, the borrowers'
 // account details, and can add a new loan. Cannot record payments, clear, write off or delete.
 function isAgentUser(){ return !!(currentUser && currentUser.role === 'agent'); }
+// 'salesperson' = tank salesperson. Sees ONLY Overview (no money figures, no loan alerts) and the
+// Log tab (level reading only). Everything else is hidden in the UI and blocked in the click handler.
+var SALES_TABS = ['overview','log'];
+function isSalesUser(){ return !!(currentUser && currentUser.role === 'salesperson'); }
+
+// ---------- desktop / mobile detection ----------
+// Picks the layout automatically: phones (and narrow or touch-first screens) get the bottom-tab
+// mobile layout; laptops/desktops/large tablets get the sidebar layout. Re-checked on resize.
+var viewMode = 'mobile';
+function detectViewMode(){
+  var ua = navigator.userAgent || '';
+  var w = window.innerWidth || document.documentElement.clientWidth || 0;
+  var coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  if (/iPhone|iPod|Android.+Mobile|Mobile.+Android|Windows Phone|IEMobile|Opera Mini/i.test(ua)) return 'mobile';
+  if (w < 820) return 'mobile';
+  if (coarse && w < 1000) return 'mobile';
+  return 'desktop';
+}
+function applyViewMode(){
+  var m = detectViewMode();
+  document.documentElement.setAttribute('data-view', m);
+  var changed = m !== viewMode;
+  viewMode = m;
+  return changed;
+}
+applyViewMode();
+(function(){
+  var t = null;
+  window.addEventListener('resize', function(){
+    clearTimeout(t);
+    t = setTimeout(function(){ if (applyViewMode() && currentUser) render(); }, 150);
+  });
+  window.addEventListener('orientationchange', function(){
+    setTimeout(function(){ if (applyViewMode() && currentUser) render(); }, 250);
+  });
+})();
 var saveDebounceTimer = null;
 var applyingRemoteUpdate = false; // guards against the snapshot listener clobbering a local edit-in-progress
 
@@ -1711,12 +1771,13 @@ function renderOverview(){
   var totals = computeTotals();
   var lowTanks = state.tanks.filter(function(t){ return t.currentLevel/TANK_CAPACITY <= 0.2; });
   var staleTanks = state.tanks.filter(function(t){ return daysSinceTankActivity(t) >= 4; });
-  var overdueLoanInfo = computeOverdueLoansSummary();
+  var sales = isSalesUser(); // salesperson: no money and no loans anywhere on this screen
+  var overdueLoanInfo = sales ? { count: 0, parts: [] } : computeOverdueLoansSummary();
   var html = '';
 
   var backupAge = daysSinceBackup();
-  if (backupAge === null || backupAge >= 7) {
-    html += '<div class="card" style="margin-bottom:14px;border-color:'+C.tank+'55;background:linear-gradient(180deg,'+C.tank+'0F,'+C.surface+');display:flex;gap:11px;align-items:center">' +
+  if (!sales && (backupAge === null || backupAge >= 7)) {
+    html += '<div class="card span2" style="margin-bottom:14px;border-color:'+C.tank+'55;background:linear-gradient(180deg,'+C.tank+'0F,'+C.surface+');display:flex;gap:11px;align-items:center">' +
       '<div style="flex-shrink:0;width:32px;height:32px;border-radius:10px;background:'+C.tank+'1A;display:flex;align-items:center;justify-content:center">'+icon('lock',16,C.tank)+'</div>' +
       '<div style="flex:1;min-width:0">' +
       '<div style="font-weight:700;font-size:13.5px;color:'+C.ink+'">' + (backupAge===null ? 'You\'ve never backed up this data' : 'No backup in '+Math.floor(backupAge)+' days') + '</div>' +
@@ -1726,21 +1787,21 @@ function renderOverview(){
       '</div>';
   }
 
-  html += '<div style="display:flex;gap:10px;margin-bottom:14px">' +
+  html += '<div class="span2" style="display:flex;gap:10px;margin-bottom:14px">' +
     statCard('Litres left', totals.litresRemaining.toLocaleString()+' L', 'across '+state.tanks.length+' tanks', C.tank) +
-    statCard('This month', rand(totals.curIncome), totals.delta===null?'no prior month yet':((totals.delta>=0?'+':'')+totals.delta+'% vs last month'), C.cash) +
+    (sales ? '' : statCard('This month', rand(totals.curIncome), totals.delta===null?'no prior month yet':((totals.delta>=0?'+':'')+totals.delta+'% vs last month'), C.cash)) +
     '</div>' +
     '<div style="margin-bottom:14px">' + statCard('Orders this month', totals.ordersThisMonth, 'restocks across all tanks', C.tank) + '</div>';
 
   html += '<div class="card" style="margin-bottom:14px">' +
     '<div class="serif" style="font-weight:600;font-size:14px;margin-bottom:8px;color:'+C.inkSoft+'">Today</div>' +
     '<div style="display:flex;gap:16px">' +
-    '<div><div class="mono" style="font-size:17px;font-weight:700;color:'+C.cash+'">'+rand(totals.collectedToday)+'</div><div style="font-size:11px;color:'+C.inkSoft+'">collected</div></div>' +
+    (sales ? '' : '<div><div class="mono" style="font-size:17px;font-weight:700;color:'+C.cash+'">'+rand(totals.collectedToday)+'</div><div style="font-size:11px;color:'+C.inkSoft+'">collected</div></div>') +
     '<div><div class="mono" style="font-size:17px;font-weight:700;color:'+C.ink+'">'+totals.litresSoldToday.toLocaleString()+' L</div><div style="font-size:11px;color:'+C.inkSoft+'">sold</div></div>' +
     '<div><div class="mono" style="font-size:17px;font-weight:700;color:'+C.ink+'">'+totals.refillsToday+'</div><div style="font-size:11px;color:'+C.inkSoft+'">refills logged</div></div>' +
     '</div></div>';
 
-  html += '<div class="card" style="margin-bottom:14px">' +
+  if (!sales) html += '<div class="card" style="margin-bottom:14px">' +
     '<div class="serif" style="font-weight:600;font-size:16px;margin-bottom:10px">Business account</div>' +
     '<div style="display:flex;gap:10px;margin-bottom:10px">' +
     statCard('Balance', moneyFmt(accountBalance('USD'),'USD'), 'account balance', accountBalance('USD')>=0?C.cash:C.crisis) +
@@ -1749,7 +1810,7 @@ function renderOverview(){
     '</div>';
 
   if (lowTanks.length || staleTanks.length || overdueLoanInfo.count) {
-    html += '<div class="card" style="margin-bottom:14px;border-color:'+C.amber+'55;background:linear-gradient(180deg,#FFF8EC,#FFFDFA);display:flex;gap:11px;align-items:flex-start">' +
+    html += '<div class="card span2" style="margin-bottom:14px;border-color:'+C.amber+'55;background:linear-gradient(180deg,#FFF8EC,#FFFDFA);display:flex;gap:11px;align-items:flex-start">' +
       '<div style="flex-shrink:0;width:32px;height:32px;border-radius:10px;background:'+C.amber+'1A;display:flex;align-items:center;justify-content:center">'+icon('alert',17,C.amber)+'</div>' +
       '<div style="flex:1;min-width:0">' +
       '<div style="font-weight:700;font-size:14px;color:'+C.ink+'">Needs attention</div>';
@@ -1758,7 +1819,7 @@ function renderOverview(){
     }
     if (staleTanks.length) {
       html += '<div style="font-size:12.5px;color:'+C.inkSoft+';margin-top:3px">'+esc(staleTanks.map(function(t){return t.name+' ('+Math.floor(daysSinceTankActivity(t))+'d)';}).join(', '))+' not visited in 4+ days.</div>' +
-        '<button data-action="set-tab" data-tab="tanks" style="margin-top:2px;background:none;border:none;color:'+C.tank+';font-weight:600;font-size:12px;padding:0">View tanks →</button>';
+        (sales ? '' : '<button data-action="set-tab" data-tab="tanks" style="margin-top:2px;background:none;border:none;color:'+C.tank+';font-weight:600;font-size:12px;padding:0">View tanks →</button>');
     }
     if (overdueLoanInfo.count) {
       html += '<div style="font-size:12.5px;color:'+C.inkSoft+';margin-top:3px">'+overdueLoanInfo.count+' loan'+(overdueLoanInfo.count===1?'':'s')+' overdue — '+overdueLoanInfo.parts.join(', ')+'.</div>' +
@@ -1786,7 +1847,7 @@ function renderOverview(){
     '<div style="display:flex;justify-content:space-between;gap:8px"><span>✅ Fully compliant</span><span style="font-weight:700;color:'+C.cash+'">'+mAlerts.compliant.length+' of '+state.tanks.length+'</span></div>' +
     '</div></div>';
 
-  html += '<div class="card"><div class="serif" style="font-weight:600;font-size:17px;margin-bottom:12px">All tanks</div><div style="display:flex;flex-direction:column;gap:12px">';
+  html += '<div class="card span2"><div class="serif" style="font-weight:600;font-size:17px;margin-bottom:12px">All tanks</div><div class="tank-list" style="display:flex;flex-direction:column;gap:12px">';
   state.tanks.forEach(function(t){
     var rate = tankRate(t.id);
     var pace = rate && rate.currentPace;
@@ -1796,18 +1857,18 @@ function renderOverview(){
     var outstandingT = (incomeOn && !paid) ? tankOutstandingCycles(t) : [];
     var badgeTitle = !incomeOn ? 'Refill-only — income tracking off' : (paid ? 'All codes paid up' : ('Unpaid: '+outstandingT.map(function(o){return o.code+' ('+cycleDateLabel(o)+')';}).join('; ')));
     html += '<div style="display:flex;align-items:center;gap:12px;border-top:1px solid '+C.line+';padding-top:12px;position:relative">' +
-      (incomeOn ? ('<span title="'+esc(badgeTitle)+'" style="position:absolute;top:8px;right:0;width:22px;height:22px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:'+(paid?C.cash:C.crisis)+'">'+icon(paid?'check':'cross',13,'#fff')+'</span>')
+      (sales ? '' : incomeOn ? ('<span title="'+esc(badgeTitle)+'" style="position:absolute;top:8px;right:0;width:22px;height:22px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:'+(paid?C.cash:C.crisis)+'">'+icon(paid?'check':'cross',13,'#fff')+'</span>')
         : ('<span title="'+esc(badgeTitle)+'" style="position:absolute;top:8px;right:0;font-size:10px;font-weight:700;color:'+C.inkSoft+';background:'+C.paper+';border:1px solid '+C.line+';border-radius:999px;padding:3px 8px">Refill only</span>')) +
       tankGaugeSVG(t.currentLevel, 52, true) +
       '<div style="flex:1;min-width:0;padding-right:28px"><div style="font-weight:600;font-size:14px">'+esc(t.name)+'</div>' +
       '<div style="font-size:12px;color:'+C.inkSoft+'">'+t.currentLevel+'L left'+(t.location?' · '+esc(t.location):'')+'</div>' +
       (daysLeft!==null ? '<div style="font-size:11.5px;color:'+C.inkSoft+'">~'+daysLeft+'d at current pace</div>' : '') +
-      (incomeOn && !paid ? '<div style="font-size:11px;color:'+C.crisis+'">'+outstandingT.map(function(o){ return '<div style="font-weight:600;margin-top:2px">'+codePill(o.code)+' · '+esc(cycleDateLabel(o))+'</div>'; }).join('')+'</div>' : '') +
+      (!sales && incomeOn && !paid ? '<div style="font-size:11px;color:'+C.crisis+'">'+outstandingT.map(function(o){ return '<div style="font-weight:600;margin-top:2px">'+codePill(o.code)+' · '+esc(cycleDateLabel(o))+'</div>'; }).join('')+'</div>' : '') +
       '</div></div>';
   });
-  html += '</div><button class="nav-btn" data-action="goto-tanks" style="width:100%;flex-direction:row;border:1px solid '+C.line+';border-radius:10px;padding:9px 12px;margin-top:14px;color:'+C.tank+';font-weight:600;font-size:13px">View tank details ' + icon('chevron',15,C.tank) + '</button></div>';
+  html += '</div>' + (sales ? '' : '<button class="nav-btn" data-action="goto-tanks" style="width:100%;flex-direction:row;border:1px solid '+C.line+';border-radius:10px;padding:9px 12px;margin-top:14px;color:'+C.tank+';font-weight:600;font-size:13px">View tank details ' + icon('chevron',15,C.tank) + '</button>') + '</div>';
 
-  return html;
+  return '<div class="ov-grid">' + html + '</div>';
 }
 
 // ---------- settings drawer ----------
@@ -1904,6 +1965,8 @@ function renderLog(){
   // back to the one mode everyone can use.
   var canCollectOrRefill = !currentUser || currentUser.role === 'admin';
   if (!canCollectOrRefill && (ui.logMode === 'collect' || ui.logMode === 'refill')) ui.logMode = 'reading';
+  var salesOnly = isSalesUser(); // salesperson can only log level readings
+  if (salesOnly) ui.logMode = 'reading';
   var mode = ui.logMode;
   // Collecting only makes sense for tanks with income tracking on — a refill-only
   // tank never has anything to collect, so it's left out of that picker entirely.
@@ -1926,6 +1989,7 @@ function renderLog(){
     '<label class="label">Tank</label><select id="f-tank" class="field" style="margin-bottom:12px">'+options+'</select>' +
     '<label class="label">Date</label><input id="f-date" type="date" class="field mono" value="'+todayISO()+'" style="margin-bottom:12px"/>';
 
+  if (salesOnly) html = '<div style="font-size:12.5px;color:'+C.inkSoft+';margin-bottom:12px">Record the litres remaining in your tank.</div>' + html.slice(html.indexOf('<div class="card">'));
   if (mode === 'reading') {
     html += '<label class="label">Level remaining (litres)</label>' +
       '<input id="f-level" type="number" inputmode="numeric" placeholder="e.g. 640" class="field mono" style="margin-bottom:14px"/>' +
@@ -1996,7 +2060,7 @@ function renderLog(){
       '<button data-action="save-watertest" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;border:none;border-radius:10px;background:linear-gradient(135deg,'+C.purple+',#5B21B6);color:#fff;font-weight:700;font-size:14px;padding:12px">'+icon('check',17,'#fff')+' Record lab result &amp; reset</button>';
   }
   html += '</div>';
-  return html;
+  return '<div class="log-narrow">' + html + '</div>';
 }
 
 function renderTanks(){
@@ -3536,7 +3600,7 @@ function renderPinModal(){
 
 function render(){
   if (isAgentUser()) ui.tab = 'lending';
-  if (currentUser && currentUser.role === 'salesperson' && (ui.tab === 'lending' || ui.tab === 'account' || ui.tab === 'income')) ui.tab = 'overview';
+  if (isSalesUser() && SALES_TABS.indexOf(ui.tab) === -1) ui.tab = 'overview';
   if (currentUser && currentUser.role === 'manager' && ui.tab === 'log') ui.tab = 'overview';
   var loading = false;
   var headerEyebrow = ui.tab==='lending' ? 'Money Lending' : ui.tab==='account' ? 'FW2 Finance' : 'FW2 Water Vending';
@@ -3566,10 +3630,23 @@ function render(){
 
   var isAdmin = !currentUser || currentUser.role === 'admin' || currentUser.role === 'manager'; // admin and manager both see every tab; fail open only if auth hasn't populated yet
   var navInner = isAgentUser() ? navBtn('lending','cash','Lending', C.cash) :
+    isSalesUser() ? (navBtn('overview','gauge','Overview', C.tank) + navBtn('log','log','Log', C.amber)) :
     navBtn('overview','gauge','Overview', C.tank) + navBtn('payments','checklist','Payments', C.crisis) + ((currentUser && currentUser.role === 'manager') ? '' : navBtn('log','log','Log', C.amber)) + navBtn('tanks','drop','Tanks', C.tank) + (isAdmin ? navBtn('income','trend','Income', C.cash) : '') + navBtn('graphs','bars','Graphs', C.purple) + navBtn('map','pin','Map', C.mapRed) +
     (isAdmin ? navBtn('lending','cash','Lending', C.cash) + navBtn('account','wallet','Account', C.gold) : '');
-  body += '</div><div class="bottom-nav">' + navInner +
-    '</div>' + renderConfirmModal() + renderPinModal() + renderDrawer();
+  body += '</div>';
+  if (viewMode === 'desktop') {
+    // Desktop: persistent left sidebar instead of the bottom tab bar.
+    body = '<div class="desk-shell"><aside class="sidebar">' +
+      '<div class="side-brand"><div style="width:42px;height:42px;border-radius:12px;background:linear-gradient(160deg,#0F2A6E 0%,'+C.tankDeep+' 100%);display:flex;align-items:center;justify-content:center;flex-shrink:0">'+fw2Logo(26, C.gold)+'</div>' +
+      '<div><div class="serif" style="font-weight:700;font-size:16px;line-height:1.1">FW2</div><div style="font-size:11px;color:'+C.inkSoft+'">Water Vending</div></div></div>' +
+      '<nav class="side-nav">' + navInner + '</nav>' +
+      '<div class="side-foot"><div style="color:'+C.inkSoft+';margin-bottom:8px">Signed in as <span style="font-weight:650;color:'+C.ink+'">'+esc(currentUser ? currentUser.name : '')+'</span></div>' +
+      '<button data-action="sign-out" style="width:100%;border:1px solid '+C.line+';border-radius:10px;background:'+C.surface+';color:'+C.crisis+';font-weight:600;font-size:13px;padding:9px">Sign out</button></div>' +
+      '</aside><main class="desk-main">' + body + '</main></div>';
+  } else {
+    body += '<div class="bottom-nav">' + navInner + '</div>';
+  }
+  body += renderConfirmModal() + renderPinModal() + renderDrawer();
 
   document.getElementById('app').innerHTML = body;
 
@@ -3615,6 +3692,12 @@ var AGENT_ALLOWED_ACTIONS = {
   'set-tab': 1, 'sign-out': 1, 'toggle-drawer': 1, 'close-drawer': 1, 'toggle-drawer-section': 1, 'toggle-theme': 1,
   'toggle-add-loan': 1, 'cancel-new-loan': 1, 'set-due-quick': 1, 'save-loan': 1
 };
+// The ONLY actions a salesperson login may trigger: switching between Overview and Log, saving a level
+// reading, plus sign-out / theme / drawer / PIN-unlock plumbing. Everything else is ignored for them.
+var SALES_ALLOWED_ACTIONS = {
+  'set-tab': 1, 'sign-out': 1, 'toggle-drawer': 1, 'close-drawer': 1, 'toggle-drawer-section': 1, 'toggle-theme': 1,
+  'goto-log-reading': 1, 'save-reading': 1, 'unlock-tab': 1, 'pin-cancel': 1, 'pin-submit': 1, 'confirm-no': 1
+};
 var ADMIN_ONLY_ACTIONS = {
   'edit-tank': 1, 'delete-tank': 1, 'toggle-income-enabled': 1,
   'toggle-add-tank': 1, 'save-new-tank': 1,
@@ -3641,6 +3724,9 @@ document.addEventListener('click', function(e){
   if (isAgentUser()) {
     if (!AGENT_ALLOWED_ACTIONS[action]) return;
     if (action === 'set-tab' && el.getAttribute('data-tab') !== 'lending') return;
+  } else if (isSalesUser()) {
+    if (!SALES_ALLOWED_ACTIONS[action]) return;
+    if (action === 'set-tab' && SALES_TABS.indexOf(el.getAttribute('data-tab')) === -1) return;
   } else if (isNonAdmin && ADMIN_ONLY_ACTIONS[action]) return;
   if (isNonAdmin && action === 'log-mode') {
     var reqMode = el.getAttribute('data-mode');
@@ -4197,11 +4283,12 @@ document.addEventListener('blur', function(e){
     var dx = t.clientX - startX, dy = t.clientY - startY;
     var dt = Date.now() - startTime;
     if (dt > MAX_DURATION || Math.abs(dy) > MAX_OFF_AXIS || Math.abs(dx) < SWIPE_DISTANCE) return;
-    if (isAgentUser()) return;
-    var idx = TAB_ORDER.indexOf(ui.tab);
+    if (isAgentUser() || viewMode === 'desktop') return;
+    var order = isSalesUser() ? SALES_TABS : TAB_ORDER;
+    var idx = order.indexOf(ui.tab);
     if (idx === -1) return;
-    if (dx < 0 && idx < TAB_ORDER.length - 1) switchTab(TAB_ORDER[idx + 1]); // swipe left -> next tab
-    else if (dx > 0 && idx > 0) switchTab(TAB_ORDER[idx - 1]); // swipe right -> previous tab
+    if (dx < 0 && idx < order.length - 1) switchTab(order[idx + 1]); // swipe left -> next tab
+    else if (dx > 0 && idx > 0) switchTab(order[idx - 1]); // swipe right -> previous tab
   }, { passive: true });
 })();
 
